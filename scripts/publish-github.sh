@@ -66,10 +66,11 @@ else
   gh release create "$TAG" release/* --title "$TITLE" --notes "$NOTES"
 fi
 
-# 6) Turn on GitHub Pages from the docs/ folder on main.
+# 6) Turn on GitHub Pages from the docs/ folder (on the repo's default branch).
+DEFBR="$(git rev-parse --abbrev-ref HEAD)"
 gh api --method POST "repos/$OWNER/$REPO/pages" \
   --input - >/dev/null 2>&1 <<JSON || echo "  (Pages may already be enabled)"
-{"source":{"branch":"main","path":"/docs"}}
+{"source":{"branch":"$DEFBR","path":"/docs"}}
 JSON
 
 echo
