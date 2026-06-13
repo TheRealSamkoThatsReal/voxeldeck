@@ -4,7 +4,11 @@
   "description": "VoxelDeck — a slick dark-themed dashboard for managing your Minecraft servers: RAM, server software, files, mods/plugins, players, and a live console.",
   "main": "src/main/main.js",
   "author": "VoxelDeck",
-  "homepage": "https://example.com/voxeldeck",
+  "homepage": "https://therealsamkothatsreal.github.io/voxeldeck/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TheRealSamkoThatsReal/voxeldeck.git"
+  },
   "license": "MIT",
   "scripts": {
     "start": "electron .",
@@ -26,6 +30,9 @@
     "directories": {
       "output": "dist"
     },
+    "publish": [
+      { "provider": "github", "owner": "TheRealSamkoThatsReal", "repo": "voxeldeck", "releaseType": "release" }
+    ],
     "linux": {
       "target": [
         "AppImage",
@@ -48,7 +55,12 @@
         "dmg"
       ],
       "category": "public.app-category.games"
-    }
+    },
+    "appImage": { "artifactName": "VoxelDeck.AppImage" },
+    "deb": { "artifactName": "voxeldeck.deb" },
+    "nsis": { "artifactName": "VoxelDeck-Setup.exe" },
+    "portable": { "artifactName": "VoxelDeck-Portable.exe" },
+    "dmg": { "artifactName": "VoxelDeck.dmg" }
   },
   "devDependencies": {
     "electron": "^33.2.0",

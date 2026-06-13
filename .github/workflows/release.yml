@@ -1,0 +1,42 @@
+name: Build & Release
+
+# Runs when you push a version tag (e.g. v1.0.1), or manually from the Actions tab.
+# Builds VoxelDeck natively on each OS and publishes the installers to a GitHub
+# Release. The download website serves them automatically (its buttons point at
+# the latest release's stable filenames).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests (Linux only)
+        if: runner.os == 'Linux'
+        run: npm test
+
+      - name: Build and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Don't try to code-sign on macOS/Windows (no certificate in CI).
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npx --no-install electron-builder --publish always

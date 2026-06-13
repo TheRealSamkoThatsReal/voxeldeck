@@ -41,29 +41,31 @@ else
     --description "VoxelDeck — a dark-themed desktop dashboard for managing Minecraft servers."
 fi
 
-# 4) Prepare release assets with clean, space-free names.
-rm -rf release && mkdir -p release
-cp "dist/VoxelDeck-1.0.0.AppImage"      "release/VoxelDeck-1.0.0.AppImage"
-cp "dist/voxeldeck_1.0.0_amd64.deb"     "release/voxeldeck_1.0.0_amd64.deb"
-cp "dist/VoxelDeck Setup 1.0.0.exe"     "release/VoxelDeck-Setup-1.0.0.exe"
-cp "dist/VoxelDeck 1.0.0.exe"           "release/VoxelDeck-1.0.0-portable.exe"
+# 4) Release assets — electron-builder already gives them stable, version-less
+#    names so the website's "latest/download/…" links never break.
+ASSETS=(
+  "dist/VoxelDeck.AppImage"
+  "dist/voxeldeck.deb"
+  "dist/VoxelDeck-Setup.exe"
+  "dist/VoxelDeck-Portable.exe"
+)
 
 # 5) Create (or update) the GitHub Release with the built apps.
-NOTES="First public release of VoxelDeck.
+NOTES="VoxelDeck $TAG.
 
 Downloads:
-- Windows installer — VoxelDeck-Setup-1.0.0.exe
-- Windows portable — VoxelDeck-1.0.0-portable.exe
-- Linux AppImage — VoxelDeck-1.0.0.AppImage
-- Debian/Ubuntu — voxeldeck_1.0.0_amd64.deb
+- Windows installer — VoxelDeck-Setup.exe
+- Windows portable — VoxelDeck-Portable.exe
+- Linux AppImage — VoxelDeck.AppImage
+- Debian/Ubuntu — voxeldeck.deb
 
 Builds are unsigned, so Windows SmartScreen may warn (More info → Run anyway).
 Get the app from the website: https://$OWNER.github.io/$REPO/"
 
 if gh release view "$TAG" >/dev/null 2>&1; then
-  gh release upload "$TAG" release/* --clobber
+  gh release upload "$TAG" "${ASSETS[@]}" --clobber
 else
-  gh release create "$TAG" release/* --title "$TITLE" --notes "$NOTES"
+  gh release create "$TAG" "${ASSETS[@]}" --title "$TITLE" --notes "$NOTES"
 fi
 
 # 6) Turn on GitHub Pages from the docs/ folder (on the repo's default branch).
