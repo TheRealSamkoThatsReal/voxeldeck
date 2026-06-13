@@ -1,0 +1,15 @@
+# Dependencies (regenerated with `npm install`)
+node_modules/
+
+# Build output (published as GitHub Release assets, not committed)
+dist/
+release/
+
+# Logs & OS cruft
+*.log
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/

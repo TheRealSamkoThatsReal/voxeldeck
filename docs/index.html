@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VoxelDeck — a dashboard for your Minecraft servers</title>
+  <meta name="description" content="VoxelDeck is a slick dark-themed desktop app to run and manage your Minecraft servers: RAM, server software, files, mods/plugins, players, console, and one-click sharing." />
+  <style>
+    :root{
+      --bg:#0e1116; --bg2:#161b22; --bg3:#1c232c; --border:#232c37;
+      --text:#e6edf3; --dim:#9aa7b4; --faint:#647082;
+      --accent:#3a88f7; --accent2:#2163de;
+      --mono:'JetBrains Mono','Fira Code',Consolas,ui-monospace,monospace;
+      --sans:'Inter',-apple-system,'Segoe UI',Roboto,sans-serif;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    html{scroll-behavior:smooth}
+    body{background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased}
+    a{color:var(--accent);text-decoration:none}
+    a:hover{text-decoration:underline}
+    .wrap{max-width:980px;margin:0 auto;padding:0 22px}
+    /* hero */
+    header{padding:64px 0 30px;text-align:center;background:
+      radial-gradient(1200px 400px at 50% -120px, rgba(58,136,247,.18), transparent 70%);}
+    .logo{width:96px;height:96px;border-radius:22px;box-shadow:0 12px 40px rgba(33,99,222,.35)}
+    h1{font-size:46px;font-weight:750;letter-spacing:-.5px;margin:18px 0 6px}
+    .tag{font-size:19px;color:var(--dim);max-width:620px;margin:0 auto}
+    .pill{display:inline-block;margin-top:16px;font-size:12.5px;color:var(--faint);background:var(--bg2);border:1px solid var(--border);border-radius:20px;padding:5px 13px}
+    /* downloads */
+    .dl{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:34px 0 8px}
+    @media(max-width:720px){.dl{grid-template-columns:1fr}}
+    .card{background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:22px}
+    .card h3{display:flex;align-items:center;gap:9px;font-size:17px;margin-bottom:4px}
+    .card .sub{color:var(--faint);font-size:13px;margin-bottom:16px}
+    .btn{display:flex;align-items:center;justify-content:space-between;gap:10px;
+      background:var(--accent);color:#fff;font-weight:650;border:none;border-radius:10px;
+      padding:12px 16px;font-size:14.5px;cursor:pointer;margin-bottom:9px;width:100%;text-align:left;transition:background .12s}
+    .btn:hover{background:#4a93f8;text-decoration:none;color:#fff}
+    .btn.alt{background:transparent;border:1px solid var(--border);color:var(--text)}
+    .btn.alt:hover{background:var(--bg3);border-color:#2f3a47}
+    .btn small{font-weight:400;opacity:.85;font-size:12px}
+    /* sections */
+    section{padding:40px 0;border-top:1px solid var(--border)}
+    h2{font-size:26px;font-weight:700;margin-bottom:18px;letter-spacing:-.3px}
+    .feat{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+    @media(max-width:720px){.feat{grid-template-columns:1fr}}
+    .feat div{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:15px 17px}
+    .feat b{display:block;font-size:14.5px;margin-bottom:3px}
+    .feat span{color:var(--dim);font-size:13px}
+    .shots{display:flex;flex-direction:column;gap:20px;margin-top:6px}
+    .shots figure{margin:0}
+    .shots img{width:100%;border-radius:12px;border:1px solid var(--border);display:block;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+    .shots figcaption{color:var(--faint);font-size:13px;margin-top:8px;text-align:center}
+    .note{background:rgba(210,153,34,.09);border:1px solid #5c4a16;border-radius:12px;padding:16px 18px;color:#f0c674;font-size:13.5px;line-height:1.6}
+    .note b{color:#ffd479}
+    code{font-family:var(--mono);background:var(--bg3);padding:2px 6px;border-radius:5px;font-size:12.5px}
+    ol{padding-left:20px}ol li{margin:6px 0;color:var(--dim)}ol li b{color:var(--text)}
+    footer{padding:34px 0 60px;text-align:center;color:var(--faint);font-size:13px;border-top:1px solid var(--border)}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <img class="logo" src="icon.png" alt="VoxelDeck logo" />
+      <h1>VoxelDeck</h1>
+      <p class="tag">A slick, dark desktop app to run and manage your Minecraft servers — RAM, server software, files, mods &amp; plugins, players, a live console, and one-click sharing.</p>
+      <div class="pill">Free &amp; open source · Windows · Linux · macOS</div>
+
+      <div class="dl">
+        <div class="card">
+          <h3>🪟 Windows</h3>
+          <div class="sub">Windows 10/11 · 64-bit</div>
+          <a class="btn" href="https://github.com/__OWNER__/voxeldeck/releases/latest/download/VoxelDeck-Setup-1.0.0.exe">
+            <span>Download installer</span><small>.exe</small></a>
+          <a class="btn alt" href="https://github.com/__OWNER__/voxeldeck/releases/latest/download/VoxelDeck-1.0.0-portable.exe">
+            <span>Portable (no install)</span><small>.exe</small></a>
+        </div>
+        <div class="card">
+          <h3>🐧 Linux</h3>
+          <div class="sub">Any modern 64-bit distro</div>
+          <a class="btn" href="https://github.com/__OWNER__/voxeldeck/releases/latest/download/VoxelDeck-1.0.0.AppImage">
+            <span>Download AppImage</span><small>portable</small></a>
+          <a class="btn alt" href="https://github.com/__OWNER__/voxeldeck/releases/latest/download/voxeldeck_1.0.0_amd64.deb">
+            <span>Debian / Ubuntu package</span><small>.deb</small></a>
+        </div>
+      </div>
+      <p style="color:var(--faint);font-size:13px;margin-top:10px">
+        All builds &amp; release notes on the <a href="https://github.com/__OWNER__/voxeldeck/releases/latest">releases page</a> ·
+        Source on <a href="https://github.com/__OWNER__/voxeldeck">GitHub</a>
+      </p>
+    </div>
+  </header>
+
+  <section>
+    <div class="wrap">
+      <h2>What it does</h2>
+      <div class="feat">
+        <div><b>🎛️ Manage many servers</b><span>One dashboard, a start/stop switch per server, live status at a glance.</span></div>
+        <div><b>📥 One-click setup</b><span>Creates the folder, downloads the server jar (Vanilla, Paper, Purpur, Fabric), and even downloads Java for you.</span></div>
+        <div><b>🧩 Built-in mod &amp; plugin browser</b><span>Search and install from Modrinth, filtered to what your server can actually run.</span></div>
+        <div><b>⚡ Quick commands</b><span>Friendly fill-in-the-blank admin actions with player-name autocomplete — no syntax to learn.</span></div>
+        <div><b>🌍 Easy sharing</b><span>Shows your local &amp; public address with copy buttons and a plain-English port-forwarding guide.</span></div>
+        <div><b>👥 Players, files &amp; more</b><span>OP toggles, gamemode, a file editor, server.properties form, RAM sliders, EULA helper, and a guided tour.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Take a look</h2>
+      <div class="shots">
+        <figure><img src="screenshots/home.png" alt="Overview dashboard" /><figcaption>Overview — every server with a start/stop switch</figcaption></figure>
+        <figure><img src="screenshots/commands.png" alt="Quick commands" /><figcaption>Quick Commands — admin actions without the syntax</figcaption></figure>
+        <figure><img src="screenshots/connect.png" alt="Connect / sharing" /><figcaption>Connect — addresses + a friendly port-forwarding guide</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Getting started</h2>
+      <ol>
+        <li>Download for your OS above and open it.</li>
+        <li>Click <b>＋</b> to add a server — the guided tour walks you through it.</li>
+        <li>Pick your server software, set RAM, and accept the Minecraft EULA.</li>
+        <li>Flip the toggle to start. Share your address from the <b>Connect</b> tab. That's it!</li>
+      </ol>
+      <p style="margin-top:14px;color:var(--dim)">VoxelDeck needs <b>Java</b> to run servers — it can download the newest Java for you automatically, or you can install it yourself.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Good to know</h2>
+      <div class="note">
+        <b>Unsigned builds.</b> These downloads aren't code-signed yet, so Windows SmartScreen may say
+        "unknown publisher" and macOS may call it "unidentified" — that's expected for an indie app.
+        On Windows click <b>More info → Run anyway</b>; on macOS right-click the app → <b>Open</b>.
+        VoxelDeck only manages servers on <i>your</i> computer and never touches your Minecraft account.
+        Not affiliated with Mojang or Microsoft.
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      VoxelDeck · MIT licensed · <a href="https://github.com/__OWNER__/voxeldeck">GitHub</a><br />
+      "Minecraft" is a trademark of Mojang Synergies AB. VoxelDeck is an independent tool and is not affiliated with or endorsed by Mojang or Microsoft.
+    </div>
+  </footer>
+</body>
+</html>

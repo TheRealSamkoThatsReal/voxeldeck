@@ -1,0 +1,57 @@
+{
+  "name": "voxeldeck",
+  "version": "1.0.0",
+  "description": "VoxelDeck — a slick dark-themed dashboard for managing your Minecraft servers: RAM, server software, files, mods/plugins, players, and a live console.",
+  "main": "src/main/main.js",
+  "author": "VoxelDeck",
+  "homepage": "https://example.com/voxeldeck",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "test": "node test/core.test.mjs && node test/lifecycle.test.cjs",
+    "test:tour": "electron test/tour-flow.cjs",
+    "install-desktop": "bash scripts/install-desktop.sh",
+    "dist": "electron-builder --linux AppImage deb",
+    "dist:win": "electron-builder --win nsis portable"
+  },
+  "build": {
+    "appId": "com.voxeldeck.app",
+    "productName": "VoxelDeck",
+    "executableName": "voxeldeck",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Game",
+      "icon": "src/renderer/assets/icon.png",
+      "maintainer": "VoxelDeck <dev@localhost>",
+      "synopsis": "Manage your Minecraft servers from one dashboard"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "src/renderer/assets/icon.png"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.games"
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^26.15.3"
+  }
+}

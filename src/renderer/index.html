@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:;" />
+  <title>VoxelDeck</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Sidebar: server list -->
+    <aside id="sidebar">
+      <div class="brand" id="brandHome" title="Go to overview">
+        <div class="brand-mark"><img src="assets/icon.png" alt="VoxelDeck" /></div>
+        <div class="brand-text">
+          <div class="brand-title">VoxelDeck</div>
+          <div class="brand-sub" id="systemRam">—</div>
+        </div>
+      </div>
+
+      <button id="homeNavBtn" class="home-nav">
+        <span class="hn-icon">⌂</span> Overview
+      </button>
+
+      <div class="sidebar-head">
+        <span>Servers</span>
+        <button id="addServerBtn" class="icon-btn" title="Add a server">＋</button>
+      </div>
+
+      <ul id="serverList" class="server-list"></ul>
+
+      <div class="sidebar-foot">
+        <button id="settingsBtn" class="ghost-btn">⚙ App settings</button>
+      </div>
+    </aside>
+
+    <!-- Main content -->
+    <main id="main">
+      <!-- Home / overview -->
+      <section id="homeView" class="home-view hidden">
+        <header class="home-header">
+          <div>
+            <h1>Dashboard</h1>
+            <p class="muted" id="homeSummary">—</p>
+          </div>
+          <button id="homeAddBtn" class="primary-btn">＋ Add a server</button>
+        </header>
+        <div id="homeGrid" class="home-grid"></div>
+      </section>
+
+      <!-- Empty state -->
+      <section id="emptyState" class="empty-state">
+        <div class="empty-art"><img src="assets/icon.png" alt="" /></div>
+        <h1>No server selected</h1>
+        <p>Add a server to get started. Point it at a folder that contains
+           (or will contain) your server <code>.jar</code> and files.</p>
+        <button id="emptyAddBtn" class="primary-btn">＋ Add a server</button>
+      </section>
+
+      <!-- Server detail -->
+      <section id="serverDetail" class="server-detail hidden">
+        <header class="detail-header">
+          <div class="detail-title">
+            <span class="status-dot" id="detailStatusDot"></span>
+            <h1 id="detailName">Server</h1>
+            <span class="status-label" id="detailStatusLabel">stopped</span>
+          </div>
+          <div class="detail-actions">
+            <span class="stat-chip" id="detailPlayers" title="Players online">👥 0</span>
+            <span class="stat-chip" id="detailRam" title="Allocated RAM">🧠 —</span>
+            <label class="switch" id="powerSwitch" title="Start / stop server">
+              <input type="checkbox" id="powerToggle" />
+              <span class="slider"></span>
+            </label>
+          </div>
+        </header>
+
+        <nav class="tabs" id="tabs">
+          <button class="tab active" data-tab="console">Console</button>
+          <button class="tab" data-tab="connect">Connect</button>
+          <button class="tab" data-tab="players">Players</button>
+          <button class="tab" data-tab="commands">Commands</button>
+          <button class="tab" data-tab="files">Files</button>
+          <button class="tab" data-tab="content" id="contentTab">Mods</button>
+          <button class="tab" data-tab="properties">Properties</button>
+          <button class="tab" data-tab="settings">Settings</button>
+        </nav>
+
+        <div class="tab-body">
+          <!-- Console -->
+          <div class="tab-pane active" data-pane="console">
+            <div id="consoleOutput" class="console-output"></div>
+            <form id="consoleForm" class="console-input">
+              <span class="prompt">&gt;</span>
+              <input type="text" id="consoleInput" placeholder="Type a command (e.g. say hello, op &lt;name&gt;, stop)…"
+                     autocomplete="off" spellcheck="false" disabled />
+              <button type="submit" class="send-btn" id="consoleSend" disabled>Send</button>
+            </form>
+          </div>
+
+          <!-- Connect / share -->
+          <div class="tab-pane" data-pane="connect">
+            <div id="connectBody" class="connect-body"></div>
+          </div>
+
+          <!-- Players -->
+          <div class="tab-pane" data-pane="players">
+            <div class="content-head">
+              <div>
+                <h2>Players</h2>
+                <p class="muted" id="playersHint"></p>
+              </div>
+              <button class="primary-btn" id="playersRefresh">Refresh</button>
+            </div>
+            <ul id="playersList" class="content-list"></ul>
+          </div>
+
+          <!-- Quick commands -->
+          <div class="tab-pane" data-pane="commands">
+            <div id="commandsBanner"></div>
+            <div id="commandsBody" class="commands-body"></div>
+          </div>
+
+          <!-- Files -->
+          <div class="tab-pane" data-pane="files">
+            <div class="files-layout">
+              <div class="files-tree">
+                <div class="files-toolbar">
+                  <div class="breadcrumb" id="breadcrumb"></div>
+                  <div class="files-tools">
+                    <button class="icon-btn" id="fileUpBtn" title="Up one level">↑</button>
+                    <button class="icon-btn" id="fileNewFileBtn" title="New file">🗎</button>
+                    <button class="icon-btn" id="fileNewFolderBtn" title="New folder">🗀</button>
+                    <button class="icon-btn" id="fileImportBtn" title="Import file(s) from disk">⬇</button>
+                    <button class="icon-btn" id="fileRefreshBtn" title="Refresh">⟳</button>
+                  </div>
+                </div>
+                <ul id="fileList" class="file-list"></ul>
+              </div>
+              <div class="files-editor">
+                <div class="editor-header">
+                  <span id="editorPath" class="editor-path">No file open</span>
+                  <button id="editorSave" class="primary-btn small" disabled>Save</button>
+                </div>
+                <textarea id="editorArea" class="editor-area" spellcheck="false"
+                          placeholder="Select a text file to view and edit it here." disabled></textarea>
+              </div>
+            </div>
+          </div>
+
+          <!-- Mods / Plugins -->
+          <div class="tab-pane" data-pane="content">
+            <div class="content-head">
+              <div>
+                <h2 id="contentTitle">Mods</h2>
+                <p class="muted" id="contentHint"></p>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button class="primary-btn" id="browseContentBtn">🔎 Browse</button>
+                <button class="ghost-btn" id="addContentBtn" style="width:auto">＋ Add from disk</button>
+              </div>
+            </div>
+            <ul id="contentList" class="content-list"></ul>
+          </div>
+
+          <!-- Properties -->
+          <div class="tab-pane" data-pane="properties">
+            <div class="content-head">
+              <div>
+                <h2>server.properties</h2>
+                <p class="muted">Common settings. The Files tab can edit the raw file.</p>
+              </div>
+              <button class="primary-btn" id="savePropsBtn">Save properties</button>
+            </div>
+            <div id="propsForm" class="props-form"></div>
+          </div>
+
+          <!-- Settings -->
+          <div class="tab-pane" data-pane="settings">
+            <div id="settingsForm" class="settings-form"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal host -->
+  <div id="modalHost" class="modal-host hidden"></div>
+  <!-- Toast host -->
+  <div id="toastHost" class="toast-host"></div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
