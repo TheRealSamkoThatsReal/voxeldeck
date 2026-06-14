@@ -337,6 +337,8 @@ function wireIpcEvents() {
     appendLogLine({ line, stream, ts });
   });
 
+  api.onUpdateStatus((s) => handleUpdateStatus(s));
+
   api.onQuitting(() => {
     document.body.innerHTML =
       '<div style="display:grid;place-items:center;height:100vh;color:#9aa7b4;font-family:sans-serif;">' +
@@ -2027,6 +2029,7 @@ async function openAppSettingsModal() {
         const host = $('#modalHost'); host.classList.add('hidden'); host.innerHTML = '';
         startTour();
       } }, '↻ Replay the guided tour')),
+    buildUpdateField(),
     el('div', { class: 'field' },
       el('label', {}, 'Config location'),
       el('div', { class: 'hint', style: 'user-select:text' }, escapeHtml(state.sysInfo.userData || '')))
@@ -2381,6 +2384,67 @@ async function endTour() {
     state.settings.tourSeen = true;
     try { await api.setSettings({ tourSeen: true }); } catch { /* non-fatal */ }
   }
+}
+
+// ============================================================================
+// Auto-update UI
+// ============================================================================
+function updateStatusText(s) {
+  if (!s) return '';
+  switch (s.state) {
+    case 'checking': return 'Checking for updates…';
+    case 'available': return `Downloading update ${s.version || ''}…`;
+    case 'downloading': return `Downloading update… ${s.percent ?? 0}%`;
+    case 'ready': return `Update ${s.version || ''} ready — restart to apply.`;
+    case 'none': return 'You’re on the latest version. ✓';
+    case 'dev': return 'Updates work in the installed app (you’re running from source).';
+    case 'unsupported': return 'Auto-update isn’t available for this build (.deb / unsigned macOS — download new versions from the website).';
+    case 'error': return `Couldn’t check for updates: ${s.message || 'unknown error'}`;
+    default: return '';
+  }
+}
+
+function handleUpdateStatus(s) {
+  state.update = s;
+  const line = document.getElementById('updateStatusLine');
+  if (line) line.textContent = updateStatusText(s);
+  if (s.state === 'ready') showUpdateBanner(s.version);
+  if (s.manual) {
+    if (s.state === 'none') toast('Up to date', 'You’re on the latest version.');
+    else if (s.state === 'available') toast('Update found', `Downloading version ${s.version}…`);
+    else if (s.state === 'ready') toast('Update ready', `Restart to update to ${s.version}.`);
+    else if (s.state === 'error') toast('Update check failed', s.message || '', 'error');
+  }
+}
+
+function showUpdateBanner(version) {
+  if (document.getElementById('updateBanner')) return;
+  const banner = el('div', { id: 'updateBanner', class: 'update-banner' },
+    el('span', { class: 'ub-text' }, `🎉 VoxelDeck ${version || ''} is ready to install`),
+    el('button', { class: 'primary-btn small', onclick: () => api.installUpdate() }, 'Restart & update'),
+    el('button', { class: 'ub-later', onclick: () => banner.remove() }, 'Later'));
+  document.body.appendChild(banner);
+}
+
+// The "Updates" control in App settings: current version + a manual check.
+function buildUpdateField() {
+  const version = state.sysInfo.appVersion || '';
+  const statusLine = el('div', { class: 'hint', id: 'updateStatusLine', style: 'margin-top:6px' }, updateStatusText(state.update));
+  const btn = el('button', { class: 'ghost-btn', style: 'width:auto' }, '⟳ Check for updates');
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    const orig = btn.textContent;
+    btn.textContent = 'Checking…';
+    const r = await call(api.checkForUpdates(), { silent: true }).catch(() => null);
+    if (r) { state.update = r; statusLine.textContent = updateStatusText(r); }
+    btn.disabled = false;
+    btn.textContent = orig;
+  });
+  return el('div', { class: 'field' },
+    el('label', {}, `Updates  ·  v${escapeHtml(version)}`),
+    btn,
+    statusLine,
+    el('div', { class: 'hint' }, 'VoxelDeck checks GitHub for new releases on launch and updates itself (Windows installer & Linux AppImage).'));
 }
 
 // ---- go ----

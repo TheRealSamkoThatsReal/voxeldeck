@@ -32,6 +32,12 @@ contextBridge.exposeInMainWorld('api', {
   openPath: (p) => invoke('app:openPath', p),
   copyText: (text) => invoke('app:copy', text),
 
+  // auto-update
+  checkForUpdates: () => invoke('update:check'),
+  installUpdate: () => invoke('update:install'),
+  updateSupported: () => invoke('update:supported'),
+  onUpdateStatus: (cb) => on('update:status', cb),
+
   // network / connection info
   netAddresses: (id) => invoke('net:addresses', id),
   netPublicIp: () => invoke('net:public'),

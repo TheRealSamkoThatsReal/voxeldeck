@@ -15,6 +15,9 @@ and stop each server.
   to click **Create**, then spotlights the real tabs of the server you just made
   and explains what each does. Skippable, remembered after it's seen, and
   replayable from ⚙ App settings.
+- **Auto-updates** — checks GitHub for new releases on launch and updates itself
+  (Windows installer & Linux AppImage), with a "Restart & update" prompt and a
+  manual "Check for updates" in ⚙ App settings.
 - **Overview home page** — a dashboard landing page with a card for every server
   showing its status, type, player count and RAM, plus a **start/stop toggle** on
   each card. Click a card (or the sidebar) to open that server; click **Overview**

@@ -13,6 +13,7 @@ const downloader = require('./downloader');
 const network = require('./network');
 const javaManager = require('./javaManager');
 const modrinth = require('./modrinth');
+const updater = require('./updater');
 
 // Pin the app name so the config folder (app.getPath('userData')) is identical
 // whether the app is run from source (`npm start`) or from a packaged build —
@@ -152,6 +153,11 @@ function registerIpc() {
   ipcMain.handle('app:openExternal', wrap(async (url) => { await shell.openExternal(url); return true; }));
 
   ipcMain.handle('app:copy', wrap(async (text) => { clipboard.writeText(String(text)); return true; }));
+
+  // ---- Auto-update ----
+  ipcMain.handle('update:check', wrap(async () => updater.check()));
+  ipcMain.handle('update:install', wrap(async () => { updater.quitAndInstall(); return true; }));
+  ipcMain.handle('update:supported', wrap(async () => updater.isSupported()));
 
   // ---- Network / connection info ----
   ipcMain.handle('net:addresses', wrap(async (id) => {
@@ -381,6 +387,7 @@ app.whenReady().then(() => {
   registerIpc();
   wireManagerEvents();
   createWindow();
+  updater.init(mainWindow);   // checks GitHub for a newer release (packaged builds only)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

@@ -49,6 +49,12 @@ ASSETS=(
   "dist/VoxelDeck-Setup.exe"
   "dist/VoxelDeck-Portable.exe"
 )
+# Include electron-updater metadata so the in-app auto-updater can find updates.
+# (The GitHub Actions release flow uploads these automatically; we add them here
+#  too in case you publish with this script.)
+for y in dist/latest.yml dist/latest-linux.yml dist/latest-mac.yml; do
+  [ -f "$y" ] && ASSETS+=("$y")
+done
 
 # 5) Create (or update) the GitHub Release with the built apps.
 NOTES="VoxelDeck $TAG.
