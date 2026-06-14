@@ -13,6 +13,7 @@ const downloader = require('./downloader');
 const network = require('./network');
 const javaManager = require('./javaManager');
 const modrinth = require('./modrinth');
+const scheduler = require('./scheduler');
 const updater = require('./updater');
 
 // Pin the app name so the config folder (app.getPath('userData')) is identical
@@ -394,6 +395,7 @@ app.whenReady().then(() => {
   wireManagerEvents();
   createWindow();
   updater.init(mainWindow);   // checks GitHub for a newer release (packaged builds only)
+  scheduler.start();          // daily scheduled restarts (per-server, opt-in)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

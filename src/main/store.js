@@ -93,6 +93,12 @@ function normalizeServer(server) {
     // Extra args passed to the jar (after `-jar file`). `nogui` by default.
     serverArgs: typeof server.serverArgs === 'string' ? server.serverArgs : 'nogui',
     autoRestart: !!server.autoRestart,
+    // Scheduled daily restart at a local-time HH:MM (24h). Only fires while the
+    // server is running; players are warned in chat first.
+    scheduledRestart: !!server.scheduledRestart,
+    scheduledRestartTime: /^([01]\d|2[0-3]):[0-5]\d$/.test(server.scheduledRestartTime)
+      ? server.scheduledRestartTime
+      : '04:00',
     createdAt: server.createdAt || Date.now()
   };
 }

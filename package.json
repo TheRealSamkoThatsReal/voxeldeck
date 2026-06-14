@@ -1,6 +1,6 @@
 {
   "name": "voxeldeck",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "description": "VoxelDeck — a slick dark-themed dashboard for managing your Minecraft servers: RAM, server software, files, mods/plugins, players, and a live console.",
   "main": "src/main/main.js",
   "author": "VoxelDeck",
@@ -13,7 +13,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "test": "node test/core.test.mjs && node test/lifecycle.test.cjs",
+    "test": "node test/core.test.mjs && node test/lifecycle.test.cjs && node test/scheduler.test.cjs",
     "test:tour": "electron test/tour-flow.cjs",
     "install-desktop": "bash scripts/install-desktop.sh",
     "dist": "electron-builder --linux AppImage deb",

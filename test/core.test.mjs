@@ -11,6 +11,7 @@ const utils = await import(path.join(root, 'src/main/serverUtils.js')).then((m) 
 const downloader = await import(path.join(root, 'src/main/downloader.js')).then((m) => m.default || m);
 const network = await import(path.join(root, 'src/main/network.js')).then((m) => m.default || m);
 const modrinth = await import(path.join(root, 'src/main/modrinth.js')).then((m) => m.default || m);
+const scheduler = await import(path.join(root, 'src/main/scheduler.js')).then((m) => m.default || m);
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mcd-'));
 let pass = 0, fail = 0;
@@ -162,6 +163,16 @@ ok('mc version from purpur jar', modrinth.detectGameVersion('purpur-26.1.2.jar')
 ok('mc version from vanilla jar', modrinth.detectGameVersion('minecraft_server.1.21.jar') === '1.21');
 ok('mc version from fabric jar', modrinth.detectGameVersion('fabric-server-mc.1.21-loader.0.16.9-launcher.1.0.1.jar') === '1.21');
 ok('mc version none when absent', modrinth.detectGameVersion('server.jar') === null);
+
+// --- scheduler: due-time matching ---
+const sched = { id: 's', scheduledRestart: true, scheduledRestartTime: '04:00' };
+ok('scheduler fires at the configured time', scheduler.isDue(sched, '04:00'));
+ok('scheduler ignores a different time', !scheduler.isDue(sched, '04:01'));
+ok('scheduler off when disabled', !scheduler.isDue({ ...sched, scheduledRestart: false }, '04:00'));
+ok('scheduler off with malformed time', !scheduler.isDue({ ...sched, scheduledRestartTime: '4:0' }, '4:0'));
+ok('scheduler off with bad hour', !scheduler.isDue({ ...sched, scheduledRestartTime: '25:00' }, '25:00'));
+ok('scheduler hhmmNow zero-pads', scheduler.hhmmNow(new Date(2026, 0, 1, 4, 5)) === '04:05');
+ok('scheduler hhmmNow handles noon+', scheduler.hhmmNow(new Date(2026, 0, 1, 23, 59)) === '23:59');
 
 // java detect (shape only; may or may not be installed)
 const j = await utils.detectJava();

@@ -56,6 +56,10 @@ and stop each server.
 - **EULA & Java helpers** — one-click EULA acceptance and Java auto-detection with
   clear warnings if Java is missing or a custom path is needed.
 - **Auto-restart** (optional) — bring a server back up automatically if it crashes.
+- **Scheduled daily restarts** (optional) — pick a time of day and the app warns
+  players in chat, then gracefully stops and restarts the server (only if it's
+  running, and while the app is open) — handy for keeping long-running servers
+  healthy.
 - **Customizable accent color** — pick a preset or any custom color in
   **⚙ App settings**; it applies live and is remembered across launches.
 

@@ -1574,6 +1574,29 @@ async function renderSettings() {
   autoCb.addEventListener('change', () => patch(srv, { autoRestart: autoCb.checked }));
   autoWrap.appendChild(el('div', { class: 'checkbox-field' }, autoCb, el('label', { style: 'margin:0' }, 'Auto-restart if the server crashes')));
   card4.appendChild(autoWrap);
+
+  // Scheduled daily restart at a fixed local time.
+  const schedWrap = el('div', { class: 'field' });
+  const schedCb = el('input', { type: 'checkbox', id: 'tourSchedRestart' });
+  schedCb.checked = !!srv.scheduledRestart;
+  const schedTime = el('input', { type: 'time', class: 'time-input', value: srv.scheduledRestartTime || '04:00' });
+  schedTime.disabled = !schedCb.checked;
+  schedCb.addEventListener('change', () => {
+    schedTime.disabled = !schedCb.checked;
+    patch(srv, { scheduledRestart: schedCb.checked });
+  });
+  schedTime.addEventListener('change', () => {
+    const v = /^([01]\d|2[0-3]):[0-5]\d$/.test(schedTime.value) ? schedTime.value : '04:00';
+    schedTime.value = v;
+    patch(srv, { scheduledRestartTime: v });
+  });
+  schedWrap.appendChild(el('div', { class: 'checkbox-field' },
+    schedCb,
+    el('label', { style: 'margin:0' }, 'Restart automatically every day at'),
+    schedTime));
+  schedWrap.appendChild(el('div', { class: 'hint' },
+    'Keeps a long-running server healthy. At this time (your computer’s local time) players get a heads-up in chat, then the server stops and starts back up. It only restarts if the server is running, and the app must be open.'));
+  card4.appendChild(schedWrap);
   form.appendChild(card4);
 
   // --- Danger ---

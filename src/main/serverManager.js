@@ -238,6 +238,11 @@ class ServerManager extends EventEmitter {
     this.emit('stats', { id, players: rt.playerNames.size, maxPlayers: rt.maxPlayers });
   }
 
+  /** Push an informational line into a server's console (e.g. from the scheduler). */
+  systemLog(id, line) {
+    this._pushLog(id, line, 'sys');
+  }
+
   /** Send a raw command line to the server's stdin. */
   sendCommand(id, command) {
     const rt = this.getRuntime(id);
