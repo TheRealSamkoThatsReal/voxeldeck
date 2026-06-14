@@ -40,34 +40,40 @@ app.whenReady().then(async () => {
     ok('5 modal still open (interactive)', isModalOpen());
 
     tourNext();
-    await sleep(80);
-    ok('6 software ring on jar button', tour.steps[tour.index].id==='software' && ringOn('#tourAddJar'));
+    await sleep(120);
+    ok('6 software ring on software dropdown', tour.steps[tour.index].id==='software' && ringOn('#tourAddType'));
     tourNext();
-    ok('7 create step shown', tour.steps[tour.index].id==='create');
+    await sleep(120);
+    ok('7 version step ring on version dropdown', tour.steps[tour.index].id==='version' && ringOn('#tourAddVersion'));
+    tourNext();
+    ok('8 create step shown', tour.steps[tour.index].id==='create');
 
+    // Use a non-auto type so create doesn't trigger a real ~50MB jar download in the test.
     document.getElementById('tourAddName').value='Tour Server';
-    document.getElementById('tourAddCreate').click();          // real create
-    ok('8 advanced to tabs after create', await waitStep('tabs', 4000));
-    ok('9 a server now exists & detail open', state.view==='detail' && state.servers.length===1);
+    const tsel=document.getElementById('tourAddType'); tsel.value='forge'; tsel.dispatchEvent(new Event('change'));
+    await sleep(150);
+    document.getElementById('tourAddCreate').click();          // creates an empty folder (no download)
+    ok('9 advanced to tabs after create', await waitStep('tabs', 6000));
+    ok('10 a server now exists & detail open', state.view==='detail' && state.servers.length===1);
     await sleep(80);
-    ok('10 tabs ring on tab strip', ringOn('#tabs'));
+    ok('11 tabs ring on tab strip', ringOn('#tabs'));
 
     tourNext();
     await sleep(80);
-    ok('11 settings-tab ring', tour.steps[tour.index].id==='settings-tab' && ringOn('.tab[data-tab="settings"]'));
+    ok('12 settings-tab ring', tour.steps[tour.index].id==='settings-tab' && ringOn('.tab[data-tab="settings"]'));
     tourNext();
     await sleep(80);
-    ok('12 toggle ring on power switch', tour.steps[tour.index].id==='toggle' && ringOn('#powerSwitch'));
+    ok('13 toggle ring on power switch', tour.steps[tour.index].id==='toggle' && ringOn('#powerSwitch'));
     tourNext();
-    ok('13 finish centered', tour.steps[tour.index].id==='finish');
+    ok('14 finish centered', tour.steps[tour.index].id==='finish');
     tourNext(); // Done -> endTour
-    ok('14 tour cleaned up (root removed)', !document.getElementById('tourRoot'));
+    ok('15 tour cleaned up (root removed)', !document.getElementById('tourRoot'));
 
     // watchdog: reopening tour, cancel modal mid-flow rewinds to click-plus
     startTour(); tourNext();
     document.getElementById('addServerBtn').click(); await waitStep('name'); tourNext(); // software
     document.querySelector('#modalHost').classList.add('hidden'); document.querySelector('#modalHost').innerHTML=''; // user cancels
-    ok('15 watchdog rewinds to click-plus on modal cancel', await waitStep('click-plus', 2000));
+    ok('16 watchdog rewinds to click-plus on modal cancel', await waitStep('click-plus', 2000));
     endTour();
     return out;
   })()`).catch(e => ['FAIL eval: ' + e.message]);

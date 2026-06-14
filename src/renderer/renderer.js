@@ -1825,21 +1825,6 @@ async function deleteServer(srv) {
 // ============================================================================
 // Add-server modal
 // ============================================================================
-/** Best-effort server type from a jar filename. */
-function guessTypeFromJar(filePath) {
-  const n = baseName(filePath).toLowerCase();
-  if (n.includes('purpur')) return 'purpur';
-  if (n.includes('paper')) return 'paper';
-  if (n.includes('spigot')) return 'spigot';
-  if (n.includes('craftbukkit') || n.includes('bukkit')) return 'bukkit';
-  if (n.includes('neoforge')) return 'neoforge';
-  if (n.includes('forge')) return 'forge';
-  if (n.includes('fabric')) return 'fabric';
-  if (n.includes('quilt')) return 'quilt';
-  if (n.includes('vanilla') || n.includes('minecraft_server') || n === 'server.jar') return 'vanilla';
-  return null;
-}
-
 /** Local mirror of the main-process folder sanitizer, for the live preview. */
 function sanitizeFolderPreview(name) {
   const cleaned = String(name || '').trim()
@@ -1848,30 +1833,64 @@ function sanitizeFolderPreview(name) {
   return cleaned || 'server';
 }
 
-function openAddServerModal() {
+async function openAddServerModal() {
   let parentDir = state.settings.serversRoot || state.sysInfo.defaultServersRoot || '';
-  let jarSource = '';   // absolute path to the chosen jar (copied on create)
+  const meta = await api.jarMeta().then((r) => r.data).catch(() => ({ autoTypes: [], pages: {} }));
+  const autoTypes = meta.autoTypes || [];
+  const pages = meta.pages || {};
 
   const nameInput = el('input', { type: 'text', id: 'tourAddName', placeholder: 'My Survival Server' });
   const typeSel = el('select', { id: 'tourAddType' }, ...SERVER_TYPES.map((t) => el('option', { value: t.value }, t.label)));
+  typeSel.value = 'paper'; // a sensible default that auto-downloads
 
-  // --- jar chooser ---
-  const jarName = el('span', { class: 'muted', style: 'font-family:var(--mono);font-size:12px;word-break:break-all' }, 'No file chosen — you can add one later');
-  const jarBtn = el('button', { class: 'ghost-btn', id: 'tourAddJar', style: 'width:auto;white-space:nowrap', onclick: async () => {
-    const file = await call(api.pickJar());
-    if (!file) return;
-    jarSource = file;
-    jarName.textContent = baseName(file);
-    jarName.classList.remove('muted');
-    const guessed = guessTypeFromJar(file);
-    if (guessed) typeSel.value = guessed;  // auto-detect software from the jar name
-  } }, 'Choose .jar…');
+  // --- Minecraft version (auto-download types) OR a note (others) ---
+  const versionSel = el('select', { id: 'tourAddVersion' }, el('option', {}, 'Loading versions…'));
+  const versionField = el('div', { class: 'field' },
+    el('label', {}, 'Minecraft version'),
+    versionSel,
+    el('div', { class: 'hint' }, 'VoxelDeck downloads the matching server jar for you when you create the server.'));
+  const noteField = el('div', { class: 'field', style: 'display:none' });
+
+  let autoDownloadable = false;
+  let vseq = 0;
+  async function refreshVersions() {
+    const type = typeSel.value;
+    autoDownloadable = autoTypes.includes(type);
+    if (autoDownloadable) {
+      noteField.style.display = 'none';
+      versionField.style.display = '';
+      const mine = ++vseq;
+      versionSel.disabled = true;
+      versionSel.innerHTML = '';
+      versionSel.appendChild(el('option', {}, 'Loading versions…'));
+      try {
+        const versions = await call(api.jarVersions(type), { silent: true });
+        if (mine !== vseq) return;
+        versionSel.innerHTML = '';
+        for (const v of versions) versionSel.appendChild(el('option', { value: v }, v));
+        versionSel.disabled = false;
+      } catch {
+        if (mine !== vseq) return;
+        versionSel.innerHTML = '';
+        versionSel.appendChild(el('option', { value: '' }, 'Couldn’t load versions — check your connection'));
+      }
+    } else {
+      versionField.style.display = 'none';
+      noteField.style.display = '';
+      noteField.innerHTML = '';
+      const page = pages[type];
+      const link2 = page ? (() => { const a = el('a', {}, 'get it from the official page ↗'); a.addEventListener('click', () => api.openExternal(page)); return a; })() : null;
+      noteField.appendChild(el('label', {}, 'Server jar'));
+      noteField.appendChild(el('div', { class: 'hint', style: 'line-height:1.6' },
+        `VoxelDeck can’t auto-download ${typeLabel(type)} (it’s installer-based or built from source). The folder is created empty — add the jar afterwards in Settings`,
+        page ? ', or ' : '.', link2 || null, page ? '.' : null));
+    }
+  }
+  typeSel.addEventListener('change', refreshVersions);
 
   // --- location + live preview ---
   const preview = el('div', { class: 'hint', style: 'font-family:var(--mono)' });
-  const updatePreview = () => {
-    preview.textContent = `📁 Creates: ${parentDir}/${sanitizeFolderPreview(nameInput.value)}`;
-  };
+  const updatePreview = () => { preview.textContent = `📁 Creates: ${parentDir}/${sanitizeFolderPreview(nameInput.value)}`; };
   nameInput.addEventListener('input', updatePreview);
   const changeLocBtn = el('button', { class: 'ghost-btn', style: 'width:auto;white-space:nowrap', onclick: async () => {
     const dir = await call(api.pickDirectory());
@@ -1881,11 +1900,10 @@ function openAddServerModal() {
 
   const body = el('div', {},
     el('div', { class: 'field' }, el('label', {}, 'Server name'), nameInput),
-    el('div', { class: 'field' },
-      el('label', {}, 'Server jar'),
-      el('div', { style: 'display:flex;align-items:center;gap:10px' }, jarBtn, jarName),
-      el('div', { class: 'hint' }, 'Point to your server .jar anywhere on disk — it’s copied into the new folder. The software type is auto-detected from the name.')),
-    el('div', { class: 'field' }, el('label', {}, 'Server software'), typeSel),
+    el('div', { class: 'field' }, el('label', {}, 'Server software'), typeSel,
+      el('div', { class: 'hint' }, 'Not sure? Paper is a great default — supports plugins, fast and stable.')),
+    versionField,
+    noteField,
     el('div', { class: 'field' },
       el('label', {}, 'Location'),
       el('div', { style: 'display:flex;align-items:center;gap:10px' },
@@ -1896,26 +1914,40 @@ function openAddServerModal() {
 
   modal({
     title: 'Add a server',
-    sub: 'The dashboard creates and sets up the folder for you.',
+    sub: 'VoxelDeck creates the folder and downloads the server for you.',
     body,
     actions: [
       { label: 'Cancel', class: 'ghost-btn' },
       { label: 'Create server', class: 'primary-btn', id: 'tourAddCreate', onClick: async () => {
         const name = nameInput.value.trim();
         if (!name) { toast('Name required', 'Give your server a name.', 'warn'); return true; }
+        const wantVersion = autoDownloadable ? versionSel.value : '';
+        const btn = document.getElementById('tourAddCreate');
+        btn.disabled = true; btn.textContent = 'Creating…';
         try {
-          const created = await call(api.setupServer({ name, type: typeSel.value, parentDir, jarSource }));
+          const created = await call(api.setupServer({ name, type: typeSel.value, parentDir }));
+          if (autoDownloadable && wantVersion) {
+            btn.textContent = 'Downloading server… 0%';
+            const unsub = api.onJarProgress(({ id, received, total }) => {
+              if (id === created.id && total) btn.textContent = `Downloading server… ${Math.round((received / total) * 100)}%`;
+            });
+            try { await call(api.downloadJar(created.id, wantVersion)); } finally { unsub(); }
+          }
           await refreshServers();
           selectServer(created.id);
           switchTab('settings');
-          toast('Server ready',
-            jarSource
-              ? 'Folder created and jar copied in. Set RAM & accept the EULA, then flip the toggle.'
-              : 'Folder created. Add a jar in Settings, then flip the toggle to start.');
-        } catch { return true; }
+          toast('Server ready', autoDownloadable && wantVersion
+            ? 'Server downloaded and set up. Set RAM & accept the EULA, then flip the toggle.'
+            : 'Folder created. Add a jar in Settings, then flip the toggle to start.');
+          return; // success — let the modal close
+        } catch {
+          btn.disabled = false; btn.textContent = 'Create server';
+          return true; // keep the modal open on error
+        }
       } }
     ]
   });
+  refreshVersions();
   setTimeout(() => nameInput.focus(), 30);
 }
 
@@ -2093,8 +2125,8 @@ function serverSoftwareNode() {
       el('span', { class: 'tt-ic' }, ic),
       el('span', { class: 'tt-text' }, el('b', {}, t), el('span', { class: 'tt-d' }, ` — ${d}`)))));
   const tip = el('p', { class: 'tour-soft-tip' },
-    'Not sure? ', el('b', {}, 'Paper'), ' is a great default — you can change it any time in Settings. ',
-    'Pick a .jar below, or grab one later with ⬇ Download. Then press Next.');
+    'Not sure? ', el('b', {}, 'Paper'), ' is a great default — you can change it any time. ',
+    'Then pick a Minecraft version below and VoxelDeck downloads the server for you. Press Next.');
   return el('div', {}, ul, tip);
 }
 
@@ -2114,15 +2146,19 @@ function tourSteps() {
       title: 'Name your server',
       body: 'Type a name for your server here — something like “My Survival Server”. You can rename it later. Then press Next.' },
 
-    { id: 'software', target: '#tourAddJar', hole: M, interactive: true, requiresModal: true, waitFor: '#tourAddJar',
+    { id: 'software', target: '#tourAddType', hole: M, interactive: true, requiresModal: true, waitFor: '#tourAddType',
       title: 'Choose your server software',
       body: 'This decides what your server can do — whether it supports plugins, mods, or neither:',
       node: serverSoftwareNode() },
 
+    { id: 'version', target: '#tourAddVersion', hole: M, interactive: true, requiresModal: true, waitFor: '#tourAddVersion',
+      title: 'Pick a Minecraft version',
+      body: 'Choose which Minecraft version to run (newest is at the top). VoxelDeck grabs the matching server jar automatically when you create the server — no files to download yourself.' },
+
     { id: 'create', target: '#tourAddCreate', hole: M, interactive: true, requiresModal: true, next: false,
       hint: 'Click “Create server” to continue', advanceWhen: () => state.view === 'detail', waitFor: '#tourAddCreate',
       title: 'Create it!',
-      body: 'When you’re happy, click “Create server”. The dashboard creates the folder and sets everything up for you.' },
+      body: 'When you’re happy, click “Create server”. VoxelDeck makes the folder and downloads the server jar for you — give it a moment to finish.' },
 
     { id: 'tabs', target: '#tabs', waitFor: '#tabs',
       title: 'Your server is ready! 🎉',
