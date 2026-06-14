@@ -62,18 +62,21 @@ app.whenReady().then(async () => {
     await sleep(80);
     ok('12 settings-tab ring', tour.steps[tour.index].id==='settings-tab' && ringOn('.tab[data-tab="settings"]'));
     tourNext();
-    await sleep(80);
-    ok('13 toggle ring on power switch', tour.steps[tour.index].id==='toggle' && ringOn('#powerSwitch'));
+    await waitStep('eula'); await sleep(120);
+    ok('13 eula step ring on Accept EULA button', tour.steps[tour.index].id==='eula' && ringOn('#tourEula'));
     tourNext();
-    ok('14 finish centered', tour.steps[tour.index].id==='finish');
+    await sleep(80);
+    ok('14 toggle ring on power switch', tour.steps[tour.index].id==='toggle' && ringOn('#powerSwitch'));
+    tourNext();
+    ok('15 finish centered', tour.steps[tour.index].id==='finish');
     tourNext(); // Done -> endTour
-    ok('15 tour cleaned up (root removed)', !document.getElementById('tourRoot'));
+    ok('16 tour cleaned up (root removed)', !document.getElementById('tourRoot'));
 
     // watchdog: reopening tour, cancel modal mid-flow rewinds to click-plus
     startTour(); tourNext();
     document.getElementById('addServerBtn').click(); await waitStep('name'); tourNext(); // software
     document.querySelector('#modalHost').classList.add('hidden'); document.querySelector('#modalHost').innerHTML=''; // user cancels
-    ok('16 watchdog rewinds to click-plus on modal cancel', await waitStep('click-plus', 2000));
+    ok('17 watchdog rewinds to click-plus on modal cancel', await waitStep('click-plus', 2000));
     endTour();
     return out;
   })()`).catch(e => ['FAIL eval: ' + e.message]);

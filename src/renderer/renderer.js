@@ -1512,7 +1512,7 @@ async function renderSettings() {
         el('span', {}, 'The Minecraft ', link('EULA', 'https://aka.ms/MinecraftEULA'),
           ' has not been accepted. The server will not start until you accept it.'),
         el('span', { class: 'banner-action' },
-          el('button', { class: 'primary-btn small', onclick: async () => {
+          el('button', { class: 'primary-btn small', id: 'tourEula', onclick: async () => {
             await call(api.setEula(srv.id, true));
             toast('EULA accepted', '');
             renderSettings();
@@ -2169,7 +2169,11 @@ function tourSteps() {
 
     { id: 'settings-tab', target: '.tab[data-tab="settings"]',
       title: 'Start here: Settings',
-      body: 'You’ve landed on the Settings tab. This is where you set how much RAM to give the server, pick or ⬇ download the jar, set your Java path, and accept the Minecraft EULA — everything you need before the first start.' },
+      body: 'You’ve landed on the Settings tab. This is where you set how much RAM to give the server, pick or ⬇ download the jar, and set your Java path — everything you need before the first start.' },
+
+    { id: 'eula', target: '#tourEula', waitFor: '#tourEula',
+      title: 'Agree to the Minecraft EULA',
+      body: 'One required step: Minecraft won’t let a server run until you accept Mojang’s End User License Agreement. Click “Accept EULA” here (it just writes eula=true for you). The server can’t start until you do.' },
 
     { id: 'toggle', target: '#powerSwitch',
       title: 'Start your server',

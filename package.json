@@ -1,6 +1,6 @@
 {
   "name": "voxeldeck",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "VoxelDeck — a slick dark-themed dashboard for managing your Minecraft servers: RAM, server software, files, mods/plugins, players, and a live console.",
   "main": "src/main/main.js",
   "author": "VoxelDeck",
