@@ -13,7 +13,27 @@ permissions:
   contents: write
 
 jobs:
+  # Create the GitHub Release ONCE, up front. Without this, all three matrix
+  # build jobs race to create the release for the same tag — two win and a
+  # duplicate release is born, while the loser dies with "already_exists".
+  # Pre-creating it means the build jobs below only ever *upload* to it.
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create or reuse the release for this tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists — reusing it."
+          else
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --title "$GITHUB_REF_NAME" --verify-tag --generate-notes
+          fi
+
   release:
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
