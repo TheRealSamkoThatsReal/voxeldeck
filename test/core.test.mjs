@@ -46,6 +46,19 @@ ok('remove works', !fs.existsSync(path.join(tmp, 'renamed.dat')));
 try { await files.remove(tmp, '.'); ok('refuses to delete root', false); }
 catch { ok('refuses to delete root', true); }
 
+// --- files: deleteDir (permanent server-folder wipe) ---
+const delDir = path.join(tmp, 'to-delete');
+await files.createDir(delDir, 'world');
+fs.writeFileSync(path.join(delDir, 'world', 'level.dat'), 'x');
+await files.deleteDir(delDir);
+ok('deleteDir removes the whole folder', !fs.existsSync(delDir));
+ok('deleteDir on a missing path is a no-op', await files.deleteDir(path.join(tmp, 'gone')) === true);
+for (const unsafe of ['/', os.homedir(), path.dirname(os.homedir()), '/usr', '/etc']) {
+  let blocked = false;
+  try { await files.deleteDir(unsafe); } catch { blocked = true; }
+  ok(`deleteDir refuses unsafe path ${unsafe}`, blocked && fs.existsSync(unsafe));
+}
+
 // listJars
 fs.writeFileSync(path.join(tmp, 'server.jar'), 'x');
 fs.writeFileSync(path.join(tmp, 'paper.jar'), 'x');

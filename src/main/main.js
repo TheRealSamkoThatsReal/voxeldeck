@@ -229,9 +229,15 @@ function registerIpc() {
     return data.servers[idx];
   }));
 
-  ipcMain.handle('servers:delete', wrap(async (id) => {
+  ipcMain.handle('servers:delete', wrap(async (id, deleteFiles) => {
     if (serverManager.isRunning(id)) throw new Error('Stop the server before deleting it');
     const data = store.readData();
+    const server = data.servers.find((s) => s.id === id);
+    // Wipe the folder from disk FIRST (when asked) so we never drop the config
+    // entry while leaving orphaned files we can no longer point a UI at.
+    if (deleteFiles && server && server.directory) {
+      await files.deleteDir(server.directory);
+    }
     data.servers = data.servers.filter((s) => s.id !== id);
     store.writeData(data);
     return true;

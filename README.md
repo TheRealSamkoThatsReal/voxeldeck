@@ -174,9 +174,13 @@ build downloads extra tooling (NSIS, fpm, etc.) into `~/.cache/electron-builder`
 
 - Server configurations and app settings:
   `~/.config/voxeldeck/servers.json` (migrated automatically from the old path)
-- Your actual server files stay wherever you put them — the dashboard never moves
-  or deletes your server folders. "Remove server" only removes it from the
-  dashboard list.
+- Your actual server files stay wherever you put them. In a server's **Settings →
+  Danger zone** you get two choices: **Remove from dashboard** (the default — takes
+  it out of VoxelDeck but leaves every file on disk), or **Delete server & all
+  files**, which permanently erases the whole server folder. The permanent option
+  makes you retype the server's exact name and wait out a short cooldown first, and
+  it is **irreversible** — there's no trash or backup, so the server can't be
+  restored afterward.
 
 ## Project layout
 

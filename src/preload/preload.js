@@ -51,7 +51,7 @@ contextBridge.exposeInMainWorld('api', {
   createServer: (partial) => invoke('servers:create', partial),
   setupServer: (opts) => invoke('servers:setup', opts),
   updateServer: (id, patch) => invoke('servers:update', id, patch),
-  deleteServer: (id) => invoke('servers:delete', id),
+  deleteServer: (id, deleteFiles) => invoke('servers:delete', id, deleteFiles),
 
   // lifecycle
   startServer: (id) => invoke('servers:start', id),

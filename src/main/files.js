@@ -3,6 +3,32 @@
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
+const os = require('os');
+
+/**
+ * Permanently delete an entire server directory from disk. Irreversible.
+ * Guarded against obviously dangerous targets (filesystem root, the user's
+ * home, common system dirs) so a bad/empty `directory` can never wipe the box.
+ */
+async function deleteDir(dir) {
+  const resolved = path.resolve(String(dir || ''));
+  const home = os.homedir();
+  const forbidden = new Set(
+    [
+      path.parse(resolved).root, // e.g. '/' or 'C:\\'
+      home,
+      path.dirname(home), // '/home'
+      '/', '/root', '/home', '/usr', '/etc', '/var', '/bin', '/boot'
+    ].map((p) => path.resolve(p))
+  );
+  // A real server folder is several levels deep; refuse anything too shallow.
+  if (!resolved || resolved.length < 4 || forbidden.has(resolved)) {
+    throw new Error(`Refusing to delete an unsafe path: ${resolved}`);
+  }
+  if (!fs.existsSync(resolved)) return true; // already gone — nothing to do
+  await fsp.rm(resolved, { recursive: true, force: true });
+  return true;
+}
 
 /**
  * File operations scoped to a server's root directory. Every path coming from
@@ -204,6 +230,7 @@ module.exports = {
   createDir,
   createFile,
   remove,
+  deleteDir,
   rename,
   importFile,
   setupServerFolder,

@@ -1577,9 +1577,19 @@ async function renderSettings() {
   form.appendChild(card4);
 
   // --- Danger ---
-  const card5 = sectionCard('Danger zone', 'Remove this server from the dashboard. Your files on disk are NOT deleted.');
-  const del = el('button', { class: 'danger-btn', onclick: () => deleteServer(srv) }, 'Remove server from dashboard');
-  card5.appendChild(del);
+  const card5 = sectionCard('Danger zone', 'Remove this server. Choose carefully — one of these is permanent.');
+  card5.appendChild(el('div', { class: 'danger-options' },
+    el('div', { class: 'danger-option' },
+      el('div', { class: 'danger-option-text' },
+        el('b', {}, 'Remove from dashboard'),
+        el('span', {}, 'Takes it out of VoxelDeck but ', el('b', {}, 'keeps all your files on disk'), '. You can add it back later by pointing at the same folder.')),
+      el('button', { class: 'danger-btn', onclick: () => deleteServer(srv) }, 'Remove from dashboard')),
+    el('div', { class: 'danger-option' },
+      el('div', { class: 'danger-option-text' },
+        el('b', {}, 'Delete server & all files'),
+        el('span', {}, 'Erases the entire server folder — world, configs, mods/plugins, everything. ', el('b', { class: 'danger-text' }, 'This cannot be undone.'))),
+      el('button', { class: 'danger-btn solid', onclick: () => deleteServerFiles(srv) }, '🗑 Delete permanently'))
+  ));
   form.appendChild(card5);
 }
 
@@ -1816,12 +1826,83 @@ async function deleteServer(srv) {
     `Remove “${srv.name}” from the dashboard? Files on disk are kept.`,
     { danger: true, confirmLabel: 'Remove' }))) return;
   try {
-    await call(api.deleteServer(srv.id));
+    await call(api.deleteServer(srv.id, false));
     state.selectedId = null;
     await refreshServers();
     if (state.servers.length) showHome();
     else showEmpty();
   } catch { /* shown */ }
+}
+
+// Permanently delete a server AND its files from disk. Irreversible, so we make
+// the user (1) retype the exact server name and (2) wait out a 3-second cooldown
+// before the confirm button is even clickable — and we say, loudly, that there
+// is no undo.
+async function deleteServerFiles(srv) {
+  if (srv.state && srv.state !== 'stopped') return toast('Stop first', 'Stop the server before deleting it.', 'warn');
+
+  const nameInput = el('input', {
+    type: 'text', class: 'danger-confirm-input', placeholder: srv.name,
+    autocomplete: 'off', autocorrect: 'off', autocapitalize: 'off', spellcheck: 'false'
+  });
+
+  const body = el('div', {},
+    el('div', { class: 'danger-callout' },
+      el('div', { class: 'danger-callout-title' }, '⚠ This permanently deletes everything'),
+      el('div', {}, 'The entire server folder — your world, configs, and all installed mods/plugins — will be erased from this computer.'),
+      el('div', { class: 'danger-callout-strong' }, 'This cannot be undone. Deleting the server this way does NOT move it to a trash or backup — there is no way to restore it afterward.')
+    ),
+    srv.directory
+      ? el('div', { class: 'danger-path' }, el('span', { class: 'danger-path-label' }, 'Folder to be erased'), el('code', {}, srv.directory))
+      : null,
+    el('div', { class: 'field danger-confirm-field' },
+      el('label', {}, 'Type the server name to confirm: ', el('b', {}, srv.name)),
+      nameInput)
+  );
+
+  let elapsed = false;
+  let remaining = 3;
+
+  const refreshBtn = () => {
+    const btn = document.getElementById('confirmDeleteFilesBtn');
+    if (!btn) return;
+    const nameOk = nameInput.value === srv.name;
+    if (!elapsed) { btn.disabled = true; btn.textContent = `Wait ${remaining}s…`; }
+    else if (!nameOk) { btn.disabled = true; btn.textContent = 'Type the name to confirm'; }
+    else { btn.disabled = false; btn.textContent = '🗑 Delete forever'; }
+  };
+  nameInput.addEventListener('input', refreshBtn);
+
+  modal({
+    title: 'Delete this server and all its files?',
+    body,
+    actions: [
+      { label: 'Cancel', class: 'ghost-btn' },
+      {
+        label: 'Wait 3s…', class: 'danger-btn solid', id: 'confirmDeleteFilesBtn',
+        onClick: async () => {
+          if (!elapsed || nameInput.value !== srv.name) return true; // guard: keep open
+          try {
+            await call(api.deleteServer(srv.id, true));
+            toast('Server deleted', 'The server and all of its files were permanently removed.');
+            state.selectedId = null;
+            await refreshServers();
+            if (state.servers.length) showHome();
+            else showEmpty();
+          } catch { return true; }
+        }
+      }
+    ]
+  });
+
+  // Forced 3-second cooldown: confirm stays locked even if the name is right.
+  const tick = setInterval(() => {
+    remaining -= 1;
+    if (remaining <= 0) { clearInterval(tick); elapsed = true; }
+    refreshBtn();
+  }, 1000);
+  refreshBtn();
+  setTimeout(() => nameInput.focus(), 40);
 }
 
 // ============================================================================
