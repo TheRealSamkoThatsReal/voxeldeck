@@ -15,6 +15,7 @@ const state = {
   activeTab: 'console',
   sysInfo: { totalRamMb: 4096, freeRamMb: 0 },
   settings: { javaPath: '', accentColor: '#3fb950' },
+  games: [],            // catalog of supported games (from main)
   // files tab
   filesCwd: '.',
   openFile: null,
@@ -231,6 +232,72 @@ function typeLabel(type) {
 }
 
 // ============================================================================
+// Games (multi-game support)
+// ============================================================================
+const GAME_BY_ID = {
+  // Sensible fallback so the UI works before the catalog loads.
+  minecraft: { id: 'minecraft', name: 'Minecraft', capabilities: { console: true, stdinCommands: true, ram: true, eula: true, properties: true, players: true, quickCommands: true, mods: true, jarDownload: true, minecraftSoftware: true }, configSchema: [], defaultPort: 25565 }
+};
+function gameDef(id) { return GAME_BY_ID[id] || GAME_BY_ID.minecraft; }
+function gameCaps(srv) { return gameDef((srv && srv.game) || 'minecraft').capabilities || {}; }
+function gameLabel(id) { return gameDef(id).name; }
+
+/** A one-word summary of a server's "kind" for list/home cards. */
+function serverKindLabel(srv) {
+  if (!srv) return '';
+  if (srv.game && srv.game !== 'minecraft') return gameLabel(srv.game);
+  return typeLabel(srv.type); // Minecraft: show the software (Paper, Fabric…)
+}
+
+/**
+ * Render a declarative configSchema into form fields. Returns the field
+ * elements plus a read() that pulls current values back out (typed).
+ */
+function buildSchemaFields(schema, values, onChange) {
+  const inputs = {};
+  const els = (schema || []).map((f) => {
+    const cur = (values && values[f.key] !== undefined && values[f.key] !== '') ? values[f.key] : f.default;
+    let input;
+    if (f.type === 'select') {
+      input = el('select', {}, ...f.options.map((o) => el('option', { value: o.value }, o.label)));
+      input.value = String(cur);
+    } else if (f.type === 'bool') {
+      input = el('input', { type: 'checkbox' });
+      input.checked = !!cur;
+    } else {
+      input = el('input', {
+        type: f.type === 'number' ? 'number' : 'text',
+        value: cur === undefined || cur === null ? '' : String(cur),
+        placeholder: f.placeholder || ''
+      });
+      if (f.min !== undefined) input.min = f.min;
+      if (f.max !== undefined) input.max = f.max;
+    }
+    inputs[f.key] = { input, type: f.type };
+    if (onChange) input.addEventListener('change', onChange);
+    if (f.type === 'bool') {
+      return el('div', { class: 'field' },
+        el('div', { class: 'checkbox-field' }, input, el('label', { style: 'margin:0' }, f.label)),
+        f.hint ? el('div', { class: 'hint' }, f.hint) : null);
+    }
+    return el('div', { class: 'field' },
+      el('label', {}, f.label), input,
+      f.hint ? el('div', { class: 'hint' }, f.hint) : null);
+  });
+  const read = () => {
+    const out = {};
+    for (const f of (schema || [])) {
+      const { input } = inputs[f.key];
+      if (f.type === 'bool') out[f.key] = input.checked;
+      else if (f.type === 'number') out[f.key] = input.value === '' ? '' : Number(input.value);
+      else out[f.key] = input.value;
+    }
+    return out;
+  };
+  return { els, read };
+}
+
+// ============================================================================
 // Bootstrap
 // ============================================================================
 async function init() {
@@ -243,6 +310,12 @@ async function init() {
   } catch { /* keep defaults */ }
   applyAccent(state.settings.accentColor);
   $('#systemRam').textContent = `${(state.sysInfo.totalRamMb / 1024).toFixed(1)} GB RAM available`;
+
+  // Load the supported-games catalog (capabilities, config schemas).
+  try {
+    state.games = await call(api.gamesCatalog(), { silent: true });
+    state.games.forEach((g) => { GAME_BY_ID[g.id] = g; });
+  } catch { /* fall back to Minecraft-only behaviour */ }
 
   wireGlobalEvents();
   wireIpcEvents();
@@ -372,7 +445,7 @@ function renderServerList() {
       el('span', { class: `status-dot ${st}` }),
       el('div', { class: 'si-info' },
         el('div', { class: 'si-name' }, srv.name),
-        el('div', { class: 'si-meta' }, `${typeLabel(srv.type)} · ${stLabel(st)}`)
+        el('div', { class: 'si-meta' }, `${serverKindLabel(srv)} · ${stLabel(st)}`)
       )
     );
     list.appendChild(item);
@@ -462,9 +535,9 @@ function renderHome() {
         el('span', { class: `status-label ${st}` }, stLabel(st))
       ),
       el('div', { class: 'hc-meta' },
-        el('span', {}, typeLabel(srv.type)),
-        el('span', {}, `👥 ${stats.players}${stats.maxPlayers ? '/' + stats.maxPlayers : ''}`),
-        el('span', {}, `🧠 ${fmtMb(srv.maxRamMb)}`)
+        el('span', {}, serverKindLabel(srv)),
+        gameCaps(srv).players ? el('span', {}, `👥 ${stats.players}${stats.maxPlayers ? '/' + stats.maxPlayers : ''}`) : null,
+        gameCaps(srv).ram ? el('span', {}, `🧠 ${fmtMb(srv.maxRamMb)}`) : null
       ),
       el('div', { class: 'hc-foot' },
         el('span', { class: 'hc-open' }, 'Open ›'),
@@ -476,12 +549,32 @@ function renderHome() {
   }
 }
 
+// Which capability gates each detail tab. Console/files/connect/settings are
+// universal; the rest depend on the game.
+const TAB_CAPABILITY = {
+  console: null, connect: null, files: null, settings: null,
+  players: 'players', commands: 'quickCommands', content: 'mods', properties: 'properties'
+};
+
+function applyGameCapabilities(srv) {
+  const caps = gameCaps(srv);
+  $$('.tab').forEach((t) => {
+    const cap = TAB_CAPABILITY[t.dataset.tab];
+    const visible = !cap || caps[cap];
+    t.style.display = visible ? '' : 'none';
+  });
+  // If the active tab is now hidden for this game, fall back to the console.
+  const activeCap = TAB_CAPABILITY[state.activeTab];
+  if (activeCap && !caps[activeCap]) switchTab('console');
+  $('#contentTab').textContent = contentLabel(srv.type);
+  $('#contentTitle').textContent = contentLabel(srv.type);
+}
+
 function renderDetail() {
   const srv = currentServer();
   if (!srv) return;
   $('#detailName').textContent = srv.name;
-  $('#contentTab').textContent = contentLabel(srv.type);
-  $('#contentTitle').textContent = contentLabel(srv.type);
+  applyGameCapabilities(srv);
   updatePowerUI();
   updateStatsUI();
 }
@@ -501,16 +594,27 @@ function updatePowerUI() {
   else { toggle.indeterminate = true; toggle.disabled = false; } // starting/stopping
 
   const live = st === 'running';
-  $('#consoleInput').disabled = !live;
-  $('#consoleSend').disabled = !live;
+  // Games without a command console (e.g. Valheim) never enable the input.
+  const canType = live && gameCaps(srv).stdinCommands !== false;
+  const input = $('#consoleInput');
+  input.disabled = !canType;
+  $('#consoleSend').disabled = !canType;
+  input.placeholder = gameCaps(srv).stdinCommands === false
+    ? 'This game has no server console commands'
+    : 'Type a command and press Enter…';
 }
 
 function updateStatsUI() {
   const srv = currentServer();
   if (!srv) return;
+  const caps = gameCaps(srv);
   const stats = srv.stats || { players: 0, maxPlayers: 0 };
-  $('#detailPlayers').textContent = `👥 ${stats.players}${stats.maxPlayers ? '/' + stats.maxPlayers : ''}`;
-  $('#detailRam').textContent = `🧠 ${(srv.maxRamMb / 1024).toFixed(srv.maxRamMb % 1024 ? 1 : 0)} GB`;
+  const playersChip = $('#detailPlayers');
+  const ramChip = $('#detailRam');
+  playersChip.style.display = caps.players ? '' : 'none';
+  ramChip.style.display = caps.ram ? '' : 'none';
+  if (caps.players) playersChip.textContent = `👥 ${stats.players}${stats.maxPlayers ? '/' + stats.maxPlayers : ''}`;
+  if (caps.ram) ramChip.textContent = `🧠 ${(srv.maxRamMb / 1024).toFixed(srv.maxRamMb % 1024 ? 1 : 0)} GB`;
 }
 
 // ============================================================================
@@ -966,7 +1070,7 @@ async function loadConnect() {
     : el('div', { class: 'muted' }, 'Couldn’t detect a local network address.'));
   localCard.appendChild(el('p', { class: 'cc-desc' },
     'The easy one: anyone connected to the same home router as this computer can use this right away — no setup needed.'));
-  if (port === 25565) {
+  if (srv.game === 'minecraft' && port === 25565) {
     localCard.appendChild(el('p', { class: 'cc-note' }, 'Tip: 25565 is Minecraft’s default port, so friends can leave the “:25565” off if they like.'));
   }
   body.appendChild(localCard);
@@ -1482,6 +1586,11 @@ async function renderSettings() {
   const form = $('#settingsForm');
   form.innerHTML = '';
 
+  // Non-Minecraft games use a tailored settings view (no Java/EULA/RAM/jar).
+  if (srv.game && srv.game !== 'minecraft') {
+    return renderNativeSettings(srv, form);
+  }
+
   // --- Java / EULA banners ---
   // Check the effective Java this server would use (its own path, else the
   // app-wide default, else PATH).
@@ -1568,14 +1677,22 @@ async function renderSettings() {
     '-XX:+UseG1GC -XX:+ParallelRefProcEnabled', 'Added before -jar. Aikar’s flags go here.'));
   card4.appendChild(textField('Server args', srv.serverArgs, (v) => patch(srv, { serverArgs: v }),
     'nogui', 'Passed after the jar name. “nogui” disables the built-in window.'));
+  appendRestartControls(card4, srv);
+  form.appendChild(card4);
+
+  // --- Danger ---
+  form.appendChild(dangerCard(srv));
+}
+
+/** Auto-restart + scheduled-daily-restart controls (shared across games). */
+function appendRestartControls(card, srv) {
   const autoWrap = el('div', { class: 'field' });
   const autoCb = el('input', { type: 'checkbox' });
   autoCb.checked = !!srv.autoRestart;
   autoCb.addEventListener('change', () => patch(srv, { autoRestart: autoCb.checked }));
   autoWrap.appendChild(el('div', { class: 'checkbox-field' }, autoCb, el('label', { style: 'margin:0' }, 'Auto-restart if the server crashes')));
-  card4.appendChild(autoWrap);
+  card.appendChild(autoWrap);
 
-  // Scheduled daily restart at a fixed local time.
   const schedWrap = el('div', { class: 'field' });
   const schedCb = el('input', { type: 'checkbox', id: 'tourSchedRestart' });
   schedCb.checked = !!srv.scheduledRestart;
@@ -1595,13 +1712,16 @@ async function renderSettings() {
     el('label', { style: 'margin:0' }, 'Restart automatically every day at'),
     schedTime));
   schedWrap.appendChild(el('div', { class: 'hint' },
-    'Keeps a long-running server healthy. At this time (your computer’s local time) players get a heads-up in chat, then the server stops and starts back up. It only restarts if the server is running, and the app must be open.'));
-  card4.appendChild(schedWrap);
-  form.appendChild(card4);
+    'Keeps a long-running server healthy. At this time (your computer’s local time) ' +
+    (gameCaps(srv).stdinCommands ? 'players get a heads-up in chat, then ' : '') +
+    'the server stops and starts back up. It only restarts if the server is running, and the app must be open.'));
+  card.appendChild(schedWrap);
+}
 
-  // --- Danger ---
-  const card5 = sectionCard('Danger zone', 'Remove this server. Choose carefully — one of these is permanent.');
-  card5.appendChild(el('div', { class: 'danger-options' },
+/** The "Danger zone" card (remove vs permanently delete) — shared across games. */
+function dangerCard(srv) {
+  const card = sectionCard('Danger zone', 'Remove this server. Choose carefully — one of these is permanent.');
+  card.appendChild(el('div', { class: 'danger-options' },
     el('div', { class: 'danger-option' },
       el('div', { class: 'danger-option-text' },
         el('b', {}, 'Remove from dashboard'),
@@ -1610,10 +1730,88 @@ async function renderSettings() {
     el('div', { class: 'danger-option' },
       el('div', { class: 'danger-option-text' },
         el('b', {}, 'Delete server & all files'),
-        el('span', {}, 'Erases the entire server folder — world, configs, mods/plugins, everything. ', el('b', { class: 'danger-text' }, 'This cannot be undone.'))),
+        el('span', {}, 'Erases the entire server folder — world, configs, everything. ', el('b', { class: 'danger-text' }, 'This cannot be undone.'))),
       el('button', { class: 'danger-btn solid', onclick: () => deleteServerFiles(srv) }, '🗑 Delete permanently'))
   ));
-  form.appendChild(card5);
+  return card;
+}
+
+// ============================================================================
+// Native-game settings (Terraria / Valheim)
+// ============================================================================
+async function renderNativeSettings(srv, form) {
+  const def = gameDef(srv.game);
+
+  // --- General ---
+  const card1 = sectionCard('General', `${def.name} server settings.`);
+  card1.appendChild(textField('Name', srv.name, (v) => patch(srv, { name: v }), srv.name));
+  form.appendChild(card1);
+
+  // --- Game configuration (from the game's schema) ---
+  if (def.configSchema && def.configSchema.length) {
+    const card2 = sectionCard(`${def.name} configuration`,
+      srv.game === 'terraria'
+        ? 'Written to serverconfig.txt. World-creation options only apply when the world is first made.'
+        : 'Applied to the server’s launch options. Restart the server for changes to take effect.');
+    const built = buildSchemaFields(def.configSchema, srv.gameConfig || {});
+    const persist = () => {
+      const next = { ...(srv.gameConfig || {}), ...built.read() };
+      srv.gameConfig = next;
+      patch(srv, { gameConfig: next });
+    };
+    built.els.forEach((node) => {
+      node.querySelectorAll('input, select').forEach((inp) => inp.addEventListener('change', persist));
+      card2.appendChild(node);
+    });
+    form.appendChild(card2);
+  }
+
+  // --- Files & install ---
+  const card3 = sectionCard('Files & install', 'Where the server lives, and (re)installing its files.');
+  const folderRow = el('div', { class: 'field' },
+    el('label', {}, 'Server folder'),
+    el('div', { class: 'with-btn' },
+      el('input', { type: 'text', value: srv.directory || '', readonly: 'readonly' }),
+      el('button', { class: 'ghost-btn', style: 'width:auto', onclick: () => srv.directory && api.openPath(srv.directory) }, 'Open')));
+  card3.appendChild(folderRow);
+
+  const installStatus = el('span', { class: 'hint' });
+  const installBtn = el('button', { class: 'primary-btn small' },
+    srv.game === 'terraria' ? '⬇ Re-download server files' : '⬇ Reinstall via SteamCMD');
+  installBtn.addEventListener('click', async () => {
+    installBtn.disabled = true;
+    const orig = installBtn.textContent;
+    const unsub = api.onGameProgress((p) => {
+      if (p.id !== srv.id) return;
+      if (p.phase === 'download' && p.total) installBtn.textContent = `Downloading… ${Math.round((p.received / p.total) * 100)}%`;
+      else if (p.message) installStatus.textContent = p.message;
+    });
+    try {
+      await call(api.installGame(srv.id));
+      installStatus.textContent = 'Done.';
+      toast('Install complete', `${def.name} server files are ready.`);
+    } catch (e) {
+      installStatus.textContent = e.message || 'Install failed.';
+    } finally {
+      unsub();
+      installBtn.disabled = false;
+      installBtn.textContent = orig;
+    }
+  });
+  card3.appendChild(el('div', { class: 'field' },
+    el('div', { style: 'display:flex;align-items:center;gap:12px;flex-wrap:wrap' }, installBtn, installStatus),
+    el('div', { class: 'hint' }, srv.game === 'valheim'
+      ? 'Requires SteamCMD installed on this PC. Reinstall to repair or update the server files.'
+      : 'Re-downloads the Terraria dedicated server into this folder.')));
+  form.appendChild(card3);
+
+  // --- Restarts ---
+  const card4 = sectionCard('Restarts', 'Keep the server fresh automatically.');
+  appendRestartControls(card4, srv);
+  form.appendChild(card4);
+
+  // --- Danger ---
+  form.appendChild(dangerCard(srv));
 }
 
 function link(text, url) {
@@ -1939,6 +2137,12 @@ function sanitizeFolderPreview(name) {
   return cleaned || 'server';
 }
 
+function installHint(gameId) {
+  if (gameId === 'terraria') return 'VoxelDeck downloads the official Terraria dedicated server and sets it up for you.';
+  if (gameId === 'valheim') return 'VoxelDeck installs the Valheim dedicated server via SteamCMD (which must be installed on this PC).';
+  return '';
+}
+
 async function openAddServerModal() {
   let parentDir = state.settings.serversRoot || state.sysInfo.defaultServersRoot || '';
   const meta = await api.jarMeta().then((r) => r.data).catch(() => ({ autoTypes: [], pages: {} }));
@@ -1946,6 +2150,14 @@ async function openAddServerModal() {
   const pages = meta.pages || {};
 
   const nameInput = el('input', { type: 'text', id: 'tourAddName', placeholder: 'My Survival Server' });
+
+  // --- Game picker ---
+  const gameList = state.games.length ? state.games : [{ id: 'minecraft', name: 'Minecraft' }];
+  const gameSel = el('select', { id: 'addGameSel' }, ...gameList.map((g) => el('option', { value: g.id }, g.name)));
+  gameSel.value = 'minecraft';
+  const gameField = el('div', { class: 'field' }, el('label', {}, 'Game'), gameSel,
+    el('div', { class: 'hint', id: 'addGameHint' }, ''));
+
   const typeSel = el('select', { id: 'tourAddType' }, ...SERVER_TYPES.map((t) => el('option', { value: t.value }, t.label)));
   typeSel.value = 'paper'; // a sensible default that auto-downloads
 
@@ -1994,6 +2206,38 @@ async function openAddServerModal() {
   }
   typeSel.addEventListener('change', refreshVersions);
 
+  // Minecraft-only fields (software + version) live in one block we can hide.
+  const mcBlock = el('div', {},
+    el('div', { class: 'field' }, el('label', {}, 'Server software'), typeSel,
+      el('div', { class: 'hint' }, 'Not sure? Paper is a great default — supports plugins, fast and stable.')),
+    versionField,
+    noteField);
+
+  // Native-game config fields get injected here on game change.
+  const nativeBlock = el('div', { style: 'display:none' });
+  let nativeRead = null;
+
+  function onGameChange() {
+    const g = gameSel.value;
+    const isMc = g === 'minecraft';
+    mcBlock.style.display = isMc ? '' : 'none';
+    nativeBlock.style.display = isMc ? 'none' : '';
+    $('#addGameHint').textContent = isMc
+      ? 'Java Edition. VoxelDeck downloads the server jar for you.'
+      : installHint(g);
+    if (isMc) {
+      nativeRead = null;
+      refreshVersions();
+    } else {
+      const def = gameDef(g);
+      const built = buildSchemaFields(def.configSchema, {});
+      nativeBlock.innerHTML = '';
+      built.els.forEach((e) => nativeBlock.appendChild(e));
+      nativeRead = built.read;
+    }
+  }
+  gameSel.addEventListener('change', onGameChange);
+
   // --- location + live preview ---
   const preview = el('div', { class: 'hint', style: 'font-family:var(--mono)' });
   const updatePreview = () => { preview.textContent = `📁 Creates: ${parentDir}/${sanitizeFolderPreview(nameInput.value)}`; };
@@ -2005,11 +2249,10 @@ async function openAddServerModal() {
   updatePreview();
 
   const body = el('div', {},
+    gameList.length > 1 ? gameField : null,
     el('div', { class: 'field' }, el('label', {}, 'Server name'), nameInput),
-    el('div', { class: 'field' }, el('label', {}, 'Server software'), typeSel,
-      el('div', { class: 'hint' }, 'Not sure? Paper is a great default — supports plugins, fast and stable.')),
-    versionField,
-    noteField,
+    mcBlock,
+    nativeBlock,
     el('div', { class: 'field' },
       el('label', {}, 'Location'),
       el('div', { style: 'display:flex;align-items:center;gap:10px' },
@@ -2027,32 +2270,73 @@ async function openAddServerModal() {
       { label: 'Create server', class: 'primary-btn', id: 'tourAddCreate', onClick: async () => {
         const name = nameInput.value.trim();
         if (!name) { toast('Name required', 'Give your server a name.', 'warn'); return true; }
-        const wantVersion = autoDownloadable ? versionSel.value : '';
+        const game = gameSel.value;
         const btn = document.getElementById('tourAddCreate');
-        btn.disabled = true; btn.textContent = 'Creating…';
-        try {
-          const created = await call(api.setupServer({ name, type: typeSel.value, parentDir }));
-          if (autoDownloadable && wantVersion) {
-            btn.textContent = 'Downloading server… 0%';
-            const unsub = api.onJarProgress(({ id, received, total }) => {
-              if (id === created.id && total) btn.textContent = `Downloading server… ${Math.round((received / total) * 100)}%`;
-            });
-            try { await call(api.downloadJar(created.id, wantVersion)); } finally { unsub(); }
+
+        // -------- Minecraft (jar download) --------
+        if (game === 'minecraft') {
+          const wantVersion = autoDownloadable ? versionSel.value : '';
+          btn.disabled = true; btn.textContent = 'Creating…';
+          try {
+            const created = await call(api.setupServer({ name, game, type: typeSel.value, parentDir }));
+            if (autoDownloadable && wantVersion) {
+              btn.textContent = 'Downloading server… 0%';
+              const unsub = api.onJarProgress(({ id, received, total }) => {
+                if (id === created.id && total) btn.textContent = `Downloading server… ${Math.round((received / total) * 100)}%`;
+              });
+              try { await call(api.downloadJar(created.id, wantVersion)); } finally { unsub(); }
+            }
+            await refreshServers();
+            selectServer(created.id);
+            switchTab('settings');
+            toast('Server ready', autoDownloadable && wantVersion
+              ? 'Server downloaded and set up. Set RAM & accept the EULA, then flip the toggle.'
+              : 'Folder created. Add a jar in Settings, then flip the toggle to start.');
+            return;
+          } catch {
+            btn.disabled = false; btn.textContent = 'Create server';
+            return true;
           }
-          await refreshServers();
-          selectServer(created.id);
-          switchTab('settings');
-          toast('Server ready', autoDownloadable && wantVersion
-            ? 'Server downloaded and set up. Set RAM & accept the EULA, then flip the toggle.'
-            : 'Folder created. Add a jar in Settings, then flip the toggle to start.');
-          return; // success — let the modal close
+        }
+
+        // -------- Native games (Terraria / Valheim) --------
+        const gc = nativeRead ? nativeRead() : {};
+        if (game === 'valheim' && (!gc.password || String(gc.password).length < 5)) {
+          toast('Password too short', 'Valheim requires a password of at least 5 characters.', 'warn');
+          return true;
+        }
+        btn.disabled = true; btn.textContent = 'Creating…';
+        let created;
+        try {
+          created = await call(api.setupServer({ name, game, parentDir, gameConfig: gc }));
         } catch {
           btn.disabled = false; btn.textContent = 'Create server';
-          return true; // keep the modal open on error
+          return true;
         }
+        // The folder + entry now exist; run the (heavy) install with progress.
+        btn.textContent = 'Installing…';
+        const unsub = api.onGameProgress((p) => {
+          if (p.id !== created.id) return;
+          if (p.phase === 'download' && p.total) btn.textContent = `Downloading… ${Math.round((p.received / p.total) * 100)}%`;
+          else if (p.message) btn.textContent = p.message.length > 42 ? p.message.slice(0, 42) + '…' : p.message;
+        });
+        let installError = null;
+        try { await call(api.installGame(created.id), { silent: true }); }
+        catch (e) { installError = e; }
+        unsub();
+        await refreshServers();
+        selectServer(created.id);
+        switchTab('settings');
+        if (installError) {
+          toast('Setup needs attention', installError.message || 'Couldn’t finish install — retry from Settings.', 'warn');
+        } else {
+          toast('Server ready', 'Installed. Review settings, then flip the toggle to start.');
+        }
+        return;
       } }
     ]
   });
+  onGameChange();
   refreshVersions();
   setTimeout(() => nameInput.focus(), 30);
 }

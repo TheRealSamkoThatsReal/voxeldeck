@@ -78,10 +78,17 @@ function writeData(data) {
 }
 
 /** Normalize a server config, filling defaults for any missing fields. */
+const KNOWN_GAMES = new Set(['minecraft', 'terraria', 'valheim']);
+
 function normalizeServer(server) {
   return {
     id: server.id || crypto.randomUUID(),
     name: server.name || 'New Server',
+    // Which game this server runs. Existing servers (no `game`) are Minecraft.
+    game: KNOWN_GAMES.has(server.game) ? server.game : 'minecraft',
+    // Free-form per-game config (Terraria serverconfig fields, Valheim launch
+    // args, …). Minecraft uses the dedicated fields below instead.
+    gameConfig: (server.gameConfig && typeof server.gameConfig === 'object') ? server.gameConfig : {},
     directory: server.directory || '',
     jar: server.jar || '',
     // Server "software" type — informational + drives mods vs plugins folder.

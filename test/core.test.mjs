@@ -12,6 +12,7 @@ const downloader = await import(path.join(root, 'src/main/downloader.js')).then(
 const network = await import(path.join(root, 'src/main/network.js')).then((m) => m.default || m);
 const modrinth = await import(path.join(root, 'src/main/modrinth.js')).then((m) => m.default || m);
 const scheduler = await import(path.join(root, 'src/main/scheduler.js')).then((m) => m.default || m);
+const gamesMod = await import(path.join(root, 'src/main/games.js')).then((m) => m.default || m);
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mcd-'));
 let pass = 0, fail = 0;
@@ -173,6 +174,43 @@ ok('scheduler off with malformed time', !scheduler.isDue({ ...sched, scheduledRe
 ok('scheduler off with bad hour', !scheduler.isDue({ ...sched, scheduledRestartTime: '25:00' }, '25:00'));
 ok('scheduler hhmmNow zero-pads', scheduler.hhmmNow(new Date(2026, 0, 1, 4, 5)) === '04:05');
 ok('scheduler hhmmNow handles noon+', scheduler.hhmmNow(new Date(2026, 0, 1, 23, 59)) === '23:59');
+
+// --- games: registry, capabilities, launch, stop, parse ---
+ok('games catalog has 3 games', gamesMod.catalog().map((g) => g.id).sort().join(',') === 'minecraft,terraria,valheim');
+ok('unknown game falls back to minecraft', gamesMod.get('nope').id === 'minecraft');
+
+const mcSrv = { game: 'minecraft', directory: '/tmp/x', jar: 'paper.jar', minRamMb: 1024, maxRamMb: 2048, javaArgs: '-XX:+UseG1GC', serverArgs: 'nogui' };
+const mcL = gamesMod.get('minecraft').launch(mcSrv, { resolvedJava: '/usr/bin/java', platform: 'linux' });
+ok('mc launch uses java + heap + jar', mcL.command === '/usr/bin/java' && mcL.args.includes('-Xms1024M') && mcL.args.includes('-Xmx2048M') && mcL.args.includes('-jar') && mcL.args.includes('paper.jar'));
+ok('mc launch passes java + server args', mcL.args.includes('-XX:+UseG1GC') && mcL.args.includes('nogui'));
+
+const tSrv = { game: 'terraria', directory: '/tmp/tw', gameConfig: { port: 7779 } };
+const tL = gamesMod.get('terraria').launch(tSrv, { platform: 'linux' });
+ok('terraria launch points at binary', tL.command.endsWith('TerrariaServer.bin.x86_64'));
+ok('terraria launch uses -config + -noupnp', tL.args.includes('-config') && tL.args.includes('-noupnp'));
+
+const vSrv = { game: 'valheim', directory: '/tmp/vw', gameConfig: { serverName: 'S', worldName: 'W', password: 'secret', port: 2456, public: true, crossplay: true } };
+const vL = gamesMod.get('valheim').launch(vSrv, { platform: 'linux' });
+ok('valheim launch sets name/port/world/password', vL.args.includes('-name') && vL.args.includes('S') && vL.args.includes('-port') && vL.args.includes('2456') && vL.args.includes('-password') && vL.args.includes('secret'));
+ok('valheim launch public + crossplay', vL.args.includes('-public') && vL.args[vL.args.indexOf('-public') + 1] === '1' && vL.args.includes('-crossplay'));
+ok('valheim launch sets steam env', vL.env.SteamAppId === '892970' && /linux64/.test(vL.env.LD_LIBRARY_PATH));
+
+ok('mc stop = stdin stop', JSON.stringify(gamesMod.get('minecraft').stopSpec()) === '{"type":"stdin","command":"stop"}');
+ok('terraria stop = stdin exit', JSON.stringify(gamesMod.get('terraria').stopSpec()) === '{"type":"stdin","command":"exit"}');
+ok('valheim stop = signal SIGINT', JSON.stringify(gamesMod.get('valheim').stopSpec()) === '{"type":"signal","signal":"SIGINT"}');
+
+ok('mc capabilities', gamesMod.get('minecraft').capabilities.ram && gamesMod.get('minecraft').capabilities.players);
+ok('terraria caps: players yes, ram no', gamesMod.get('terraria').capabilities.players && !gamesMod.get('terraria').capabilities.ram);
+ok('valheim caps: no stdin, no players', !gamesMod.get('valheim').capabilities.stdinCommands && !gamesMod.get('valheim').capabilities.players);
+
+const mcReady = gamesMod.get('minecraft').parse.ready.some((re) => re.test('[12:00:01] [Server thread/INFO]: Done (1.2s)! For help, type "help"'));
+ok('mc ready regex matches Done line', mcReady);
+ok('terraria ready regex matches', gamesMod.get('terraria').parse.ready.some((re) => re.test('Server started')));
+ok('terraria join captures name', 'Alice'.match(gamesMod.get('terraria').parse.join) === null && 'Alice has joined.'.match(gamesMod.get('terraria').parse.join)[1] === 'Alice');
+ok('valheim ready regex matches', gamesMod.get('valheim').parse.ready.some((re) => re.test('Game server connected')));
+
+const tcf = gamesMod.get('terraria').configFile({ game: 'terraria', directory: '/tmp/tw', gameConfig: { worldName: 'Hub', worldSize: '2', maxPlayers: 6, port: 7779 } });
+ok('terraria configFile has world + autocreate + port', /world=/.test(tcf.contents) && /autocreate=2/.test(tcf.contents) && /port=7779/.test(tcf.contents) && /worldname=Hub/.test(tcf.contents));
 
 // java detect (shape only; may or may not be installed)
 const j = await utils.detectJava();

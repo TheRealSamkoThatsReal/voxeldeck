@@ -5,6 +5,7 @@ const { EventEmitter } = require('events');
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
+const games = require('./games');
 
 /**
  * Owns the lifecycle of every Minecraft server process.
@@ -95,38 +96,32 @@ class ServerManager extends EventEmitter {
       throw new Error('Server is already running');
     }
 
-    // Validate directory + jar exist before spawning.
-    if (!server.directory || !fs.existsSync(server.directory)) {
-      throw new Error('Server directory does not exist. Set it in Settings.');
-    }
-    const jarPath = path.join(server.directory, server.jar || '');
-    if (!server.jar || !fs.existsSync(jarPath)) {
-      throw new Error('Server jar not found. Pick one in Settings.');
+    const game = games.get(server.game);
+    const platform = process.platform;
+
+    // Validate prerequisites (directory + jar/binary) with a friendly message.
+    game.validate(server, platform);
+
+    // Native game binaries can lose their executable bit through zip extraction
+    // or a file copy — restore it best-effort before launching.
+    if (game.capabilities.native && game.binaryPath) {
+      try { fs.chmodSync(game.binaryPath(server, platform), 0o755); } catch { /* best effort */ }
     }
 
-    const java = this._resolveJava(server, globalJavaPath);
-
-    const args = [];
-    args.push(`-Xms${server.minRamMb}M`);
-    args.push(`-Xmx${server.maxRamMb}M`);
-    if (server.javaArgs && server.javaArgs.trim()) {
-      args.push(...tokenize(server.javaArgs));
-    }
-    args.push('-jar', server.jar);
-    if (server.serverArgs && server.serverArgs.trim()) {
-      args.push(...tokenize(server.serverArgs));
-    }
+    const resolvedJava = this._resolveJava(server, globalJavaPath);
+    const launch = game.launch(server, { resolvedJava, platform });
 
     rt.manualStop = false;
     rt.playerNames.clear();
     this._setState(id, 'starting');
-    this._pushLog(id, `$ ${java} ${args.join(' ')}`, 'sys');
-    this._pushLog(id, `(working directory: ${server.directory})`, 'sys');
+    this._pushLog(id, `$ ${launch.command} ${launch.args.join(' ')}`, 'sys');
+    this._pushLog(id, `(working directory: ${launch.cwd})`, 'sys');
 
     let proc;
     try {
-      proc = spawn(java, args, {
-        cwd: server.directory,
+      proc = spawn(launch.command, launch.args, {
+        cwd: launch.cwd,
+        env: launch.env || process.env,
         stdio: ['pipe', 'pipe', 'pipe']
       });
     } catch (err) {
@@ -139,7 +134,10 @@ class ServerManager extends EventEmitter {
 
     proc.on('error', (err) => {
       if (err.code === 'ENOENT') {
-        this._pushLog(id, `Java executable not found ("${java}"). Install Java or set a Java path in Settings.`, 'err');
+        const hint = game.id === 'minecraft'
+          ? 'Install Java or set a Java path in Settings.'
+          : 'The server files may be missing — re-run setup from Settings.';
+        this._pushLog(id, `Couldn’t launch ("${launch.command}"). ${hint}`, 'err');
       } else {
         this._pushLog(id, `Process error: ${err.message}`, 'err');
       }
@@ -188,48 +186,48 @@ class ServerManager extends EventEmitter {
     }
   }
 
-  /** Parse interesting events out of server log lines. */
+  /** Parse interesting events out of server log lines (per-game rules). */
   _scanLine(id, line) {
     const rt = this.getRuntime(id);
+    const game = games.get(rt.server && rt.server.game);
+    const p = game.parse || {};
 
-    // Transition starting → running when the server reports it's done.
-    if (rt.state === 'starting' && /\bDone\b.*For help, type/i.test(line)) {
+    // Transition starting → running when the server reports it's ready.
+    if (rt.state === 'starting' && (p.ready || []).some((re) => re.test(line))) {
       this._setState(id, 'running');
     }
-    // Some softwares just print 'Done (x.xxxs)!'
-    if (rt.state === 'starting' && /]:\s*Done\s*\(/i.test(line)) {
-      this._setState(id, 'running');
+
+    // Player tracking only applies to games that surface players in their logs.
+    if (!game.capabilities.players) return;
+
+    // Player join / leave, capturing the player name.
+    if (p.join) {
+      const m = line.match(p.join);
+      if (m) { rt.playerNames.add(m[1].trim()); this._emitStats(id); }
+    }
+    if (p.leave) {
+      const m = line.match(p.leave);
+      if (m) { rt.playerNames.delete(m[1].trim()); this._emitStats(id); }
     }
 
-    // Player join / leave (vanilla + most forks), capturing the player name.
-    const joinM = line.match(/:\s([A-Za-z0-9_]{1,16}) joined the game\b/);
-    const leaveM = line.match(/:\s([A-Za-z0-9_]{1,16}) left the game\b/);
-    if (joinM) {
-      rt.playerNames.add(joinM[1]);
-      this._emitStats(id);
-    } else if (leaveM) {
-      rt.playerNames.delete(leaveM[1]);
-      this._emitStats(id);
+    // Output of a roster command (e.g. Minecraft `list`) — authoritative sync.
+    if (p.list) {
+      const m = line.match(p.list);
+      if (m) {
+        rt.maxPlayers = parseInt(m[1], 10);
+        const names = (m[2] || '')
+          .split(',')
+          .map((s) => s.trim().split(/\s+/)[0]) // drop any "(uuid)"/suffix
+          .filter((s) => /^[A-Za-z0-9_]{1,16}$/.test(s));
+        rt.playerNames = new Set(names);
+        this._emitStats(id);
+      }
     }
 
-    // Output of the `list` command — authoritative sync of who's online.
-    //   "There are 2 of a max of 20 players online: Alice, Bob"
-    const listM = line.match(/There are \d+ of a max of (\d+) players online:?\s*(.*)$/i);
-    if (listM) {
-      rt.maxPlayers = parseInt(listM[1], 10);
-      const names = listM[2]
-        .split(',')
-        .map((s) => s.trim().split(/\s+/)[0]) // drop any "(uuid)"/suffix
-        .filter((s) => /^[A-Za-z0-9_]{1,16}$/.test(s));
-      rt.playerNames = new Set(names);
-      this._emitStats(id);
-    }
-
-    // Max players from a "max-players" config/log line, if present.
-    const maxMatch = line.match(/max(?:imum)?[ -]?players?[:=]\s*(\d+)/i);
-    if (maxMatch) {
-      rt.maxPlayers = parseInt(maxMatch[1], 10);
-      this._emitStats(id);
+    // Max players from a config/log line, if present.
+    if (p.maxPlayers) {
+      const m = line.match(p.maxPlayers);
+      if (m) { rt.maxPlayers = parseInt(m[1], 10); this._emitStats(id); }
     }
   }
 
@@ -269,10 +267,16 @@ class ServerManager extends EventEmitter {
     }
 
     this._setState(id, 'stopping');
-    this._pushLog(id, 'Sending "stop" to server…', 'sys');
-    try {
-      if (rt.proc.stdin.writable) rt.proc.stdin.write('stop\n');
-    } catch { /* ignore */ }
+    const spec = games.get(rt.server && rt.server.game).stopSpec(rt.server);
+    if (spec.type === 'signal') {
+      this._pushLog(id, `Sending ${spec.signal} to server (it saves on shutdown)…`, 'sys');
+      try { rt.proc.kill(spec.signal); } catch { /* ignore */ }
+    } else {
+      this._pushLog(id, `Sending "${spec.command}" to server…`, 'sys');
+      try {
+        if (rt.proc.stdin.writable) rt.proc.stdin.write(spec.command + '\n');
+      } catch { /* ignore */ }
+    }
 
     // Escalate if it doesn't exit cleanly.
     rt.stopTimer = setTimeout(() => {
@@ -294,8 +298,10 @@ class ServerManager extends EventEmitter {
     const ids = [...this.runtime.keys()].filter((id) => this.isRunning(id));
     for (const id of ids) {
       const rt = this.getRuntime(id);
+      const spec = games.get(rt.server && rt.server.game).stopSpec(rt.server);
       try {
-        if (rt.proc && rt.proc.stdin.writable) rt.proc.stdin.write('stop\n');
+        if (spec.type === 'signal') { if (rt.proc) rt.proc.kill(spec.signal); }
+        else if (rt.proc && rt.proc.stdin.writable) rt.proc.stdin.write(spec.command + '\n');
       } catch { /* ignore */ }
     }
     // Give them a moment, then hard-kill leftovers.
@@ -307,17 +313,6 @@ class ServerManager extends EventEmitter {
       }
     }
   }
-}
-
-/** Split a command-line string into tokens, honoring simple quotes. */
-function tokenize(str) {
-  const out = [];
-  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
-  let m;
-  while ((m = re.exec(str)) !== null) {
-    out.push(m[1] ?? m[2] ?? m[3]);
-  }
-  return out;
 }
 
 module.exports = new ServerManager();

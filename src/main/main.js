@@ -14,6 +14,8 @@ const network = require('./network');
 const javaManager = require('./javaManager');
 const modrinth = require('./modrinth');
 const scheduler = require('./scheduler');
+const games = require('./games');
+const gameInstaller = require('./gameInstaller');
 const updater = require('./updater');
 
 // Pin the app name so the config folder (app.getPath('userData')) is identical
@@ -163,12 +165,15 @@ function registerIpc() {
   // ---- Network / connection info ----
   ipcMain.handle('net:addresses', wrap(async (id) => {
     const { server } = getServerOrThrow(id);
-    let port = 25565;
+    const game = games.get(server.game);
+    let port = game.defaultPort || 25565;
     try {
-      if (server.directory) {
+      if (server.game === 'minecraft' && server.directory) {
         const props = await utils.readProperties(server.directory);
         const p = props.entries.find((e) => e.key === 'server-port');
         if (p && /^\d+$/.test(p.value.trim())) port = parseInt(p.value.trim(), 10);
+      } else if (server.gameConfig && /^\d+$/.test(String(server.gameConfig.port || ''))) {
+        port = parseInt(server.gameConfig.port, 10);
       }
     } catch { /* default port */ }
     const local = network.primaryLocalIPv4();
@@ -209,13 +214,22 @@ function registerIpc() {
   // Create a server AND scaffold its folder on disk (mkdir, copy jar, make the
   // plugins/ or mods/ folder), then persist it.
   ipcMain.handle('servers:setup', wrap(async (opts) => {
-    const { name, type = 'vanilla', parentDir, jarSource } = opts || {};
+    const { name, game = 'minecraft', type = 'vanilla', parentDir, jarSource, gameConfig } = opts || {};
     const data = store.readData();
     const root = parentDir || data.settings.serversRoot || path.join(os.homedir(), 'MinecraftServers');
-    const cf = utils.contentFolder(type);
-    const contentDir = cf.vanilla ? null : cf.dir; // don't make a misleading mods/ for vanilla
-    const { directory, jar } = await files.setupServerFolder(root, name, jarSource || '', contentDir);
-    const server = store.normalizeServer({ id: store.newId(), name, type, directory, jar });
+    // For Minecraft we pre-make the plugins/ or mods/ folder and copy any jar.
+    // Native games (Terraria/Valheim) get an empty folder; their installer fills it.
+    let directory, jar = '';
+    if (game === 'minecraft') {
+      const cf = utils.contentFolder(type);
+      const contentDir = cf.vanilla ? null : cf.dir;
+      ({ directory, jar } = await files.setupServerFolder(root, name, jarSource || '', contentDir));
+    } else {
+      ({ directory } = await files.setupServerFolder(root, name, '', null));
+    }
+    const server = store.normalizeServer({
+      id: store.newId(), name, game, type, directory, jar, gameConfig: gameConfig || {}
+    });
     data.servers.push(server);
     store.writeData(data);
     return server;
@@ -225,9 +239,15 @@ function registerIpc() {
     const data = store.readData();
     const idx = data.servers.findIndex((s) => s.id === id);
     if (idx === -1) throw new Error('Server not found');
-    data.servers[idx] = store.normalizeServer({ ...data.servers[idx], ...patch, id });
+    const merged = store.normalizeServer({ ...data.servers[idx], ...patch, id });
+    data.servers[idx] = merged;
     store.writeData(data);
-    return data.servers[idx];
+    // Native games with a generated config file (Terraria's serverconfig.txt)
+    // need it rewritten whenever their settings change.
+    if (merged.directory && typeof games.get(merged.game).configFile === 'function') {
+      try { await gameInstaller.writeGameConfigFile(merged); } catch { /* non-fatal */ }
+    }
+    return merged;
   }));
 
   ipcMain.handle('servers:delete', wrap(async (id, deleteFiles) => {
@@ -345,6 +365,33 @@ function registerIpc() {
   }));
 
   // ---- Server jar download ----
+  // ---- Games ----
+  ipcMain.handle('games:catalog', wrap(async () => games.catalog()));
+
+  // Install/scaffold a non-Minecraft game's server files (Terraria zip, Valheim
+  // via SteamCMD), streaming progress to the renderer.
+  ipcMain.handle('game:install', wrap(async (id) => {
+    const { server } = getServerOrThrow(id);
+    if (serverManager.isRunning(id)) throw new Error('Stop the server before reinstalling it.');
+    const patch = await gameInstaller.install(server, (p) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('game:progress', { id, ...p });
+      }
+    });
+    // Persist any installer-reported config (e.g. the resolved binary name).
+    if (patch && Object.keys(patch).length) {
+      const data = store.readData();
+      const idx = data.servers.findIndex((s) => s.id === id);
+      if (idx !== -1) {
+        data.servers[idx] = store.normalizeServer({
+          ...data.servers[idx], gameConfig: { ...data.servers[idx].gameConfig, ...patch }, id
+        });
+        store.writeData(data);
+      }
+    }
+    return true;
+  }));
+
   ipcMain.handle('jar:meta', wrap(async () => downloader.meta()));
   ipcMain.handle('jar:versions', wrap(async (type) => downloader.listVersions(type)));
   ipcMain.handle('jar:download', wrap(async (id, version) => {

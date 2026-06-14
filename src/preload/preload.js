@@ -89,6 +89,11 @@ contextBridge.exposeInMainWorld('api', {
   removeContent: (id, name) => invoke('content:remove', id, name),
   addContent: (id) => invoke('content:add', id),
 
+  // games (multi-game support)
+  gamesCatalog: () => invoke('games:catalog'),
+  installGame: (id) => invoke('game:install', id),
+  onGameProgress: (cb) => on('game:progress', cb),
+
   // server jar download
   jarMeta: () => invoke('jar:meta'),
   jarVersions: (type) => invoke('jar:versions', type),

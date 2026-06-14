@@ -1,14 +1,24 @@
 # ⛏ VoxelDeck
 
-A slick, dark-themed desktop app for managing multiple Minecraft servers.
-Set RAM, swap server software, browse and edit files, install mods/plugins, and
-use a live server console — all from one place, with a toggle switch to start
-and stop each server.
+A slick, dark-themed desktop app for managing your game servers — **Minecraft,
+Terraria, and Valheim** — from one place. Set things up, browse and edit files,
+watch a live console, and flip a toggle to start or stop each server. Each game
+gets a tailored experience (Minecraft keeps RAM/EULA/mods/players; Terraria and
+Valheim get one-click install and their own config), while the core — multiple
+servers, console, files, auto- and scheduled restarts — is shared.
 
 ![Built with Electron](https://img.shields.io/badge/Electron-dark--theme-3fb950)
 
 ## Features
 
+- **Multiple games — Minecraft, Terraria & Valheim.** Pick the game when you add
+  a server and VoxelDeck adapts: it installs the right server (downloads the
+  Minecraft jar, the Terraria dedicated server, or runs SteamCMD for Valheim),
+  shows only the tabs that game supports, and gives each its own settings.
+  Minecraft is the most full-featured (RAM, EULA, `server.properties`, players,
+  mods); Terraria adds a console, players and a `serverconfig.txt` editor;
+  Valheim installs via SteamCMD and stops gracefully (it has no console, so it's
+  shut down with a signal so the world saves).
 - **Interactive guided tour** — a hands-on first-run walkthrough that actually
   walks you through creating your first server: it waits for you to click **+**,
   highlights each field in the Add-server window as you fill it in, waits for you
@@ -66,13 +76,15 @@ and stop each server.
 ## Requirements
 
 - **Linux** with **Node.js 18+** (you have Node 26 ✓).
-- **Java** — Minecraft servers are Java programs, so you need a JRE/JDK installed.
-  The app detects Java and warns you if it's missing. Recommended:
-  [Adoptium Temurin](https://adoptium.net/) (Java 21 for modern Minecraft).
-  On Arch/CachyOS: `sudo pacman -S jdk21-openjdk`. On Debian/Ubuntu:
-  `sudo apt install openjdk-21-jre`.
-- You provide the **server `.jar`** and any world/config files yourself — just put
-  them in a folder and point a server at it.
+- **Java** (Minecraft only) — Minecraft servers are Java programs. The app
+  detects Java, warns if it's missing, and can download the newest for you.
+  Recommended: [Adoptium Temurin](https://adoptium.net/). On Arch/CachyOS:
+  `sudo pacman -S jdk21-openjdk`; on Debian/Ubuntu: `sudo apt install openjdk-21-jre`.
+- **SteamCMD** (Valheim only) — Valheim's dedicated server is installed through
+  SteamCMD, so it must be on your PATH (Debian/Ubuntu: `sudo apt install steamcmd`,
+  Arch: `yay -S steamcmd`). If it's missing, VoxelDeck tells you how to get it.
+- **Terraria** needs nothing extra — VoxelDeck downloads the official dedicated
+  server for you.
 
 ## Quick start
 
