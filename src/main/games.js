@@ -48,7 +48,8 @@ const minecraft = {
     quickCommands: true,
     mods: true,          // Modrinth browser
     jarDownload: true,   // version dropdown + auto jar download
-    minecraftSoftware: true // renderer shows the Paper/Fabric/… picker
+    minecraftSoftware: true, // renderer shows the Paper/Fabric/… picker
+    clientMods: true     // per-server client-mod profile + "apply to my Minecraft"
   },
   defaultPort: 25565,
   configSchema: [], // handled by the existing Minecraft-specific UI

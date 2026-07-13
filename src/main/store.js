@@ -27,7 +27,10 @@ const DEFAULT_DATA = {
     // use the runtime default (~/MinecraftServers).
     serversRoot: '',
     // Whether the first-run guided tour has been seen/dismissed.
-    tourSeen: false
+    tourSeen: false,
+    // Client Minecraft install used by the client-mod installer. Empty = use the
+    // OS default (~/.minecraft, %APPDATA%\.minecraft, …), resolved at runtime.
+    minecraftDir: ''
   },
   servers: []
 };
@@ -106,8 +109,32 @@ function normalizeServer(server) {
     scheduledRestartTime: /^([01]\d|2[0-3]):[0-5]\d$/.test(server.scheduledRestartTime)
       ? server.scheduledRestartTime
       : '04:00',
+    // Client-side mod profile — the mods a player needs locally to join this
+    // server. Each entry: { source:'modrinth'|'local', filename, title?, projectId?, versionNumber?, size? }.
+    clientMods: normalizeClientMods(server.clientMods),
     createdAt: server.createdAt || Date.now()
   };
+}
+
+/** Keep only well-formed client-mod entries (each must at least name a file). */
+function normalizeClientMods(list) {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const e of list) {
+    if (!e || typeof e.filename !== 'string' || !e.filename) continue;
+    if (seen.has(e.filename)) continue; // a mods folder can't hold two identically-named jars
+    seen.add(e.filename);
+    out.push({
+      source: e.source === 'local' ? 'local' : 'modrinth',
+      filename: e.filename,
+      title: typeof e.title === 'string' ? e.title : e.filename,
+      projectId: e.projectId || null,
+      versionNumber: e.versionNumber || null,
+      size: Number.isFinite(e.size) ? e.size : 0
+    });
+  }
+  return out;
 }
 
 function clampInt(value, min, fallback) {

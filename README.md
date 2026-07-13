@@ -61,6 +61,16 @@ servers, console, files, auto- and scheduled restarts — is shared.
   import files from anywhere on disk. Sandboxed to each server's folder.
 - **Mods / Plugins manager** — list installed `.jar`s, enable/disable them with a
   switch (toggles a `.disabled` suffix), add new ones, and remove them.
+- **Client-side mod installer** (Minecraft) — every server gets its own **client
+  mod profile**: the mods a *player* needs on their own machine to join that
+  modded server. Browse Modrinth for client-side mods (matched to the server's
+  loader and Minecraft version) or add local `.jar`s; they download into a
+  per-server cache. Then hit **⬇ Apply to my Minecraft** and pick where to install:
+  an **isolated profile folder** under `.minecraft/voxeldeck-profiles/<server>/`
+  that VoxelDeck keeps in exact sync (point a launcher profile at it — nothing
+  else is touched), or your **main `.minecraft/mods`**, where anything already
+  there is moved to a timestamped backup folder first so the swap is reversible.
+  Set the Minecraft folder in **⚙ App settings** (auto-detected per-OS by default).
 - **server.properties editor** — a friendly form for the common settings
   (MOTD, gamemode, difficulty, max players, port, PvP, whitelist, view distance…).
 - **EULA & Java helpers** — one-click EULA acceptance and Java auto-detection with
@@ -208,6 +218,7 @@ src/
     store.js         JSON persistence of server configs
     files.js         sandboxed file operations
     serverUtils.js   java detection, server.properties, eula, mods/plugins
+    clientMods.js    client-side mod profiles: cache, download & apply to .minecraft
   preload/
     preload.js       safe contextBridge API (the only renderer ↔ main surface)
   renderer/
@@ -217,6 +228,8 @@ src/
 test/
   core.test.mjs        unit tests for file/properties/eula/content logic
   lifecycle.test.cjs   start → run → console → stop, using a fake Java
+  client-mods.test.cjs client mod cache + apply (isolated sync vs. backup-and-swap)
+  clientmods-smoke.cjs dev tool: drives the Client Mods tab/modals in Electron
   shoot.cjs            dev tool: screenshots each view via Electron
 ```
 

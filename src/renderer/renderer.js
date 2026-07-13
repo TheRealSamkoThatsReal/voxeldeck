@@ -236,7 +236,7 @@ function typeLabel(type) {
 // ============================================================================
 const GAME_BY_ID = {
   // Sensible fallback so the UI works before the catalog loads.
-  minecraft: { id: 'minecraft', name: 'Minecraft', capabilities: { console: true, stdinCommands: true, ram: true, eula: true, properties: true, players: true, quickCommands: true, mods: true, jarDownload: true, minecraftSoftware: true }, configSchema: [], defaultPort: 25565 }
+  minecraft: { id: 'minecraft', name: 'Minecraft', capabilities: { console: true, stdinCommands: true, ram: true, eula: true, properties: true, players: true, quickCommands: true, mods: true, jarDownload: true, minecraftSoftware: true, clientMods: true }, configSchema: [], defaultPort: 25565 }
 };
 function gameDef(id) { return GAME_BY_ID[id] || GAME_BY_ID.minecraft; }
 function gameCaps(srv) { return gameDef((srv && srv.game) || 'minecraft').capabilities || {}; }
@@ -370,6 +370,11 @@ function wireGlobalEvents() {
   // content
   $('#addContentBtn').addEventListener('click', onAddContent);
   $('#browseContentBtn').addEventListener('click', openModrinthBrowser);
+
+  // client mods
+  $('#addClientModsBtn').addEventListener('click', onAddClientModLocal);
+  $('#browseClientModsBtn').addEventListener('click', openClientModsBrowser);
+  $('#applyClientModsBtn').addEventListener('click', openApplyClientModsModal);
 
   // properties
   $('#savePropsBtn').addEventListener('click', saveProperties);
@@ -553,7 +558,7 @@ function renderHome() {
 // universal; the rest depend on the game.
 const TAB_CAPABILITY = {
   console: null, connect: null, files: null, settings: null,
-  players: 'players', commands: 'quickCommands', content: 'mods', properties: 'properties'
+  players: 'players', commands: 'quickCommands', content: 'mods', clientmods: 'clientMods', properties: 'properties'
 };
 
 function applyGameCapabilities(srv) {
@@ -667,6 +672,7 @@ function switchTab(tab) {
   else if (tab === 'commands') loadCommands();
   else if (tab === 'files') navigateFiles(state.filesCwd);
   else if (tab === 'content') loadContent();
+  else if (tab === 'clientmods') loadClientMods();
   else if (tab === 'properties') loadProperties();
   else if (tab === 'settings') renderSettings();
 }
@@ -1486,6 +1492,212 @@ function renderModrinthResults(srv, container, hits, getMatch) {
         el('div', { class: 'mr-meta' }, `⬇ ${Number(h.downloads).toLocaleString()} downloads`)),
       installBtn));
   }
+}
+
+// ============================================================================
+// Client-side mod profile — the mods a player needs locally to join this
+// server, plus one-click "apply to my Minecraft".
+// ============================================================================
+let clientModsCache = null; // last { entries, minecraftDir, targets, … } for the Apply modal
+
+async function loadClientMods() {
+  const srv = currentServer();
+  if (!srv) return;
+  const list = $('#clientModsList');
+  // Client mods only make sense for a mod loader (Fabric/Quilt/Forge/NeoForge).
+  // Other types can still add local jars (e.g. Sodium), but there's nothing to browse.
+  $('#browseClientModsBtn').style.display = MOD_TYPES.has(srv.type) ? '' : 'none';
+  try {
+    const data = await call(api.clientModsList(srv.id));
+    clientModsCache = data;
+    const n = data.entries.length;
+    $('#clientModsHint').textContent =
+      `${n} mod${n === 1 ? '' : 's'} in this server’s profile  ·  Minecraft: ${data.minecraftDir}` +
+      (data.minecraftExists ? '' : '  ·  ⚠ not found — set it in ⚙ App settings');
+    $('#applyClientModsBtn').disabled = n === 0;
+    renderClientModsList(srv, data);
+  } catch (err) {
+    list.innerHTML = '';
+    list.appendChild(emptyList('⚠', err.message));
+  }
+}
+
+function renderClientModsList(srv, data) {
+  const list = $('#clientModsList');
+  list.innerHTML = '';
+  if (!data.entries.length) {
+    list.appendChild(emptyList('🎒',
+      MOD_TYPES.has(srv.type)
+        ? 'No client mods yet. Click “Browse” to add the mods players need to join, then “Apply to my Minecraft”.'
+        : 'No client mods yet. Add .jar files with “Add from disk”, then “Apply to my Minecraft”.'));
+    return;
+  }
+  for (const item of data.entries) {
+    const meta = [fmtSize(item.size)];
+    if (item.versionNumber) meta.push(item.versionNumber);
+    if (item.source === 'local') meta.push('local file');
+    if (!item.cached) meta.push('⚠ download missing');
+    const row = el('div', { class: 'content-row' + (item.cached ? '' : ' disabled') },
+      el('div', { class: 'cr-info' },
+        el('div', { class: 'cr-name' }, item.title || item.filename),
+        el('div', { class: 'cr-meta' }, meta.join('  ·  '))
+      ),
+      el('button', { class: 'icon-btn', title: 'Remove from profile', onclick: () => removeClientMod(item) }, '🗑')
+    );
+    list.appendChild(row);
+  }
+}
+
+async function onAddClientModLocal() {
+  const srv = currentServer();
+  if (!srv) return;
+  try {
+    const added = await call(api.clientModsAddLocal(srv.id));
+    if (added.length) {
+      toast('Added', `${added.length} mod(s) added to the profile.`);
+      await loadClientMods();
+    }
+  } catch { /* shown */ }
+}
+
+async function removeClientMod(item) {
+  const srv = currentServer();
+  if (!(await confirmModal('Remove?', `Remove "${item.title || item.filename}" from this server’s client profile?`,
+    { danger: true, confirmLabel: 'Remove' }))) return;
+  try {
+    await call(api.clientModsRemove(srv.id, item.filename));
+    await loadClientMods();
+  } catch { /* shown */ }
+}
+
+// Browse Modrinth for client mods and add them to the profile (downloads now,
+// so applying later is offline). Mirrors the server Mods browser.
+function openClientModsBrowser() {
+  const srv = currentServer();
+  if (!srv) return;
+
+  const input = el('input', { type: 'text', placeholder: 'Search… (e.g. Sodium, Iris, JEI, Fabric API)' });
+  const matchCb = el('input', { type: 'checkbox' });
+  const matchLabel = el('span', {}, 'Only show builds for my Minecraft version');
+  const matchWrap = el('label', { class: 'mr-vfilter' }, matchCb, matchLabel);
+  const results = el('div', { class: 'mr-results' }, el('div', { class: 'muted', style: 'padding:16px' }, 'Loading…'));
+  const body = el('div', {},
+    el('div', { class: 'mr-search' }, input),
+    matchWrap,
+    results,
+    el('div', { class: 'hint', style: 'margin-top:10px' }, 'Client mods from ',
+      link('Modrinth', 'https://modrinth.com'),
+      ' — matched to this server’s loader. Added mods are stored in the profile; use ',
+      el('b', {}, 'Apply to my Minecraft'), ' to install them.'));
+
+  modal({ title: 'Add client mods', body, wide: true, actions: [{ label: 'Done', class: 'ghost-btn' }] });
+
+  const getMatch = () => matchCb.checked;
+  let seq = 0;
+  async function doSearch() {
+    const mine = ++seq;
+    results.innerHTML = '';
+    results.appendChild(el('div', { class: 'muted', style: 'padding:16px' }, 'Searching…'));
+    try {
+      const data = await call(api.clientModsSearch(srv.id, input.value, matchCb.checked), { silent: true });
+      if (mine !== seq) return;
+      if (data.gameVersion) {
+        matchLabel.textContent = `Only show builds for Minecraft ${data.gameVersion}`;
+        matchCb.disabled = false; matchWrap.classList.remove('disabled');
+      } else {
+        matchLabel.textContent = 'Couldn’t detect your Minecraft version — pick a server jar in Settings';
+        matchCb.checked = false; matchCb.disabled = true; matchWrap.classList.add('disabled');
+      }
+      renderClientModrinthResults(srv, results, data.hits, getMatch);
+    } catch (err) {
+      if (mine !== seq) return;
+      results.innerHTML = '';
+      results.appendChild(emptyList('⚠', err.message));
+    }
+  }
+  matchCb.addEventListener('change', doSearch);
+  let t = null;
+  input.addEventListener('input', () => { clearTimeout(t); t = setTimeout(doSearch, 350); });
+  setTimeout(() => input.focus(), 30);
+  doSearch();
+}
+
+function renderClientModrinthResults(srv, container, hits, getMatch) {
+  container.innerHTML = '';
+  if (!hits.length) { container.appendChild(emptyList('🔍', 'No matches — try a different search.')); return; }
+  for (const h of hits) {
+    const addBtn = el('button', { class: 'primary-btn small' }, 'Add');
+    addBtn.addEventListener('click', async () => {
+      const orig = addBtn.textContent;
+      addBtn.disabled = true; addBtn.textContent = 'Adding…';
+      const unsub = api.onClientModsProgress((p) => {
+        if (p.projectId === h.projectId && p.total) addBtn.textContent = `${Math.round((p.received / p.total) * 100)}%`;
+      });
+      try {
+        const r = await call(api.clientModsAdd(srv.id, h.projectId, getMatch ? getMatch() : false));
+        unsub();
+        addBtn.textContent = '✓ Added';
+        toast('Added to profile', `${h.title} (${r.versionNumber})`);
+        loadClientMods(); // refresh the list behind the modal
+      } catch {
+        unsub();
+        addBtn.disabled = false; addBtn.textContent = orig;
+      }
+    });
+
+    const icon = h.icon
+      ? el('img', { class: 'mr-icon', src: h.icon, alt: '', loading: 'lazy' })
+      : el('div', { class: 'mr-icon mr-icon-ph' }, '🎒');
+    container.appendChild(el('div', { class: 'mr-row' },
+      icon,
+      el('div', { class: 'mr-info' },
+        el('div', { class: 'mr-title' }, h.title, el('span', { class: 'mr-author' }, ` by ${h.author}`)),
+        el('div', { class: 'mr-desc' }, h.description || ''),
+        el('div', { class: 'mr-meta' }, `⬇ ${Number(h.downloads).toLocaleString()} downloads`)),
+      addBtn));
+  }
+}
+
+// Choose a target Minecraft folder and install the profile into it.
+async function openApplyClientModsModal() {
+  const srv = currentServer();
+  if (!srv) return;
+  const data = clientModsCache || await call(api.clientModsList(srv.id)).catch(() => null);
+  if (!data) return;
+  if (!data.entries.length) return toast('Nothing to apply', 'Add some client mods first.', 'warn');
+
+  // Radio: isolated (safe, default) vs the real .minecraft/mods (backs up first).
+  const isoRadio = el('input', { type: 'radio', name: 'cmTarget', value: 'isolated', checked: true });
+  const mainRadio = el('input', { type: 'radio', name: 'cmTarget', value: 'main' });
+  const pick = (radio, title, desc) =>
+    el('label', { class: 'cm-target' }, radio,
+      el('div', {}, el('div', { class: 'cm-target-title' }, title), el('div', { class: 'hint' }, desc)));
+
+  const body = el('div', {},
+    el('p', { class: 'muted' }, `Install this server’s ${data.entries.length} client mod(s) into Minecraft.`),
+    pick(isoRadio, 'Its own profile folder (recommended)',
+      `Creates an isolated install VoxelDeck keeps in sync: ${data.targets.isolated}. In your launcher, add a profile whose game directory is that folder’s parent.`),
+    pick(mainRadio, 'My main Minecraft (.minecraft/mods)',
+      `Installs into ${data.targets.main}. Any mods already there are moved to a timestamped backup folder first, so it’s reversible.`),
+    data.minecraftExists ? null
+      : el('div', { class: 'hint', style: 'margin-top:8px' }, '⚠ That Minecraft folder doesn’t exist yet — it’ll be created. Set a different one in ⚙ App settings.'));
+
+  modal({
+    title: 'Apply to my Minecraft',
+    body,
+    actions: [
+      { label: 'Cancel', class: 'ghost-btn' },
+      { label: 'Apply', class: 'primary-btn', onClick: async () => {
+        const target = mainRadio.checked ? 'main' : 'isolated';
+        try {
+          const r = await call(api.clientModsApply(srv.id, target));
+          const extra = r.backupDir ? ` ${r.backedUp.length} existing mod(s) backed up.` : '';
+          toast('Applied', `${r.installed.length} mod(s) installed to ${r.modsDir}.${extra}`);
+          await call(api.openPath(r.modsDir), { silent: true }).catch(() => {});
+        } catch { return true; /* keep modal open on failure */ }
+      } }
+    ]
+  });
 }
 
 // ============================================================================
@@ -2398,6 +2610,14 @@ async function openAppSettingsModal() {
     if (dir) rootInput.value = dir;
   } }, 'Browse…');
 
+  // Client Minecraft folder (used by the client-mod installer). Blank = OS default.
+  const mcInput = el('input', { type: 'text', value: settings.minecraftDir || '',
+    placeholder: '.minecraft (auto-detected)' });
+  const mcBrowse = el('button', { class: 'ghost-btn', style: 'width:auto;white-space:nowrap', onclick: async () => {
+    const dir = await call(api.pickDirectory());
+    if (dir) mcInput.value = dir;
+  } }, 'Browse…');
+
   const body = el('div', {},
     buildAccentField(normalizeHex(settings.accentColor || DEFAULT_ACCENT)),
     el('div', { class: 'field' },
@@ -2411,6 +2631,12 @@ async function openAppSettingsModal() {
       status,
       el('div', { class: 'hint' }, 'Used when a server doesn’t specify its own Java path. The button grabs the newest Java (Eclipse Temurin) automatically — no manual install needed. ',
         link('Or get it yourself', 'https://adoptium.net/'))),
+    el('div', { class: 'field' },
+      el('label', {}, 'Minecraft folder (client mods)'),
+      el('div', { class: 'with-btn' }, mcInput, mcBrowse),
+      el('div', { class: 'hint' }, 'Where the ', el('b', {}, 'Client Mods'),
+        ' tab installs mods. Blank = your OS default (', el('code', {}, '~/.minecraft'), ', ',
+        el('code', {}, '%APPDATA%\\.minecraft'), ', …).')),
     el('div', { class: 'field' },
       el('label', {}, 'Getting started'),
       el('button', { class: 'ghost-btn', style: 'width:auto', onclick: () => {
@@ -2429,7 +2655,7 @@ async function openAppSettingsModal() {
     actions: [
       { label: 'Close', class: 'ghost-btn' },
       { label: 'Save', class: 'primary-btn', onClick: async () => {
-        const patch = { javaPath: javaInput.value.trim(), serversRoot: rootInput.value.trim() };
+        const patch = { javaPath: javaInput.value.trim(), serversRoot: rootInput.value.trim(), minecraftDir: mcInput.value.trim() };
         await call(api.setSettings(patch));
         state.settings = { ...state.settings, ...patch };
         toast('Settings saved', '');
