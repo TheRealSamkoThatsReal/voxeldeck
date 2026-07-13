@@ -13,9 +13,10 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "test": "node test/core.test.mjs && node test/lifecycle.test.cjs && node test/scheduler.test.cjs && node test/games-lifecycle.test.cjs && node test/client-mods.test.cjs",
+    "test": "node test/core.test.mjs && node test/lifecycle.test.cjs && node test/scheduler.test.cjs && node test/games-lifecycle.test.cjs && node test/client-mods.test.cjs && node test/backups.test.cjs",
     "test:tour": "electron test/tour-flow.cjs",
     "test:clientmods": "electron test/clientmods-smoke.cjs",
+    "test:backups": "electron test/backups-smoke.cjs",
     "install-desktop": "bash scripts/install-desktop.sh",
     "dist": "electron-builder --linux AppImage deb",
     "dist:win": "electron-builder --win nsis portable"

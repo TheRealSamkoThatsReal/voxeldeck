@@ -14,6 +14,7 @@ const network = require('./network');
 const javaManager = require('./javaManager');
 const modrinth = require('./modrinth');
 const clientMods = require('./clientMods');
+const backups = require('./backups');
 const scheduler = require('./scheduler');
 const games = require('./games');
 const gameInstaller = require('./gameInstaller');
@@ -399,20 +400,19 @@ function registerIpc() {
     return { entries, minecraftDir: mcDir, minecraftExists: fs.existsSync(mcDir), targets };
   }));
 
-  ipcMain.handle('clientmods:search', wrap(async (id, query, matchVersion) => {
+  ipcMain.handle('clientmods:search', wrap(async (id, query, matchVersion, loader) => {
     const { server } = getServerOrThrow(id);
     const gameVersion = modrinth.detectGameVersion(server.jar);
-    const data = await modrinth.search({
-      query, type: server.type, gameVersion: matchVersion ? gameVersion : null, clientSide: true
-    });
+    const useLoader = loader || modrinth.defaultClientLoader(server.type);
+    const data = await modrinth.searchClient({ query, loader: useLoader, gameVersion: matchVersion ? gameVersion : null });
     return { ...data, gameVersion };
   }));
 
-  ipcMain.handle('clientmods:add', wrap(async (id, projectId, matchVersion) => {
+  ipcMain.handle('clientmods:add', wrap(async (id, projectId, matchVersion, loader) => {
     const { data, server } = getServerOrThrow(id);
-    if (!modrinth.targetFor(server.type)) throw new Error('This server type has no mod loader to match client mods to.');
+    const useLoader = loader || modrinth.defaultClientLoader(server.type);
     const gameVersion = matchVersion ? modrinth.detectGameVersion(server.jar) : null;
-    const entry = await clientMods.addFromModrinth(clientCacheDir(id), projectId, server.type, gameVersion, (p) => {
+    const entry = await clientMods.addFromModrinth(clientCacheDir(id), projectId, useLoader, gameVersion, (p) => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('clientmods:progress', { id, projectId, ...p });
     });
     return upsertClientMod(data, id, entry);
@@ -458,6 +458,62 @@ function registerIpc() {
       own: !isMain,               // we fully manage the isolated folder; only back up the user's real one
       backupLabel: isMain ? backupLabel : null
     });
+  }));
+
+  // ---- Backups ----
+  function backupsRoot() {
+    const custom = (store.readData().settings.backupsRoot || '').trim();
+    return custom || backups.defaultBackupsRoot(app.getPath('userData'));
+  }
+  // Ask a running Minecraft server to flush its world to disk before archiving,
+  // so the backup captures a consistent save.
+  async function flushSaves(server) {
+    if (server.game === 'minecraft' && serverManager.getState(server.id) === 'running') {
+      try {
+        serverManager.sendCommand(server.id, 'save-all flush');
+        await new Promise((r) => setTimeout(r, 1500));
+      } catch { /* not writable — archive as-is */ }
+    }
+  }
+  const backupProgress = (id) => (p) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('backups:progress', { id, ...p });
+  };
+
+  ipcMain.handle('backups:list', wrap(async (id) => {
+    const { server } = getServerOrThrow(id);
+    const root = backupsRoot();
+    return { dir: backups.serverBackupDir(root, id), entries: await backups.list(root, id), running: serverManager.isRunning(id) };
+  }));
+
+  ipcMain.handle('backups:create', wrap(async (id) => {
+    const { server } = getServerOrThrow(id);
+    const root = backupsRoot();
+    await flushSaves(server);
+    const meta = await backups.create(server, root, { type: 'manual', onProgress: backupProgress(id) });
+    await backups.prune(root, id, server.backupRetention); // keep the auto-safety pile bounded
+    return meta;
+  }));
+
+  ipcMain.handle('backups:restore', wrap(async (id, name) => {
+    const { server } = getServerOrThrow(id);
+    if (serverManager.isRunning(id)) throw new Error('Stop the server before restoring a backup.');
+    const root = backupsRoot();
+    await backups.restore(server, root, name, { onProgress: backupProgress(id) });
+    await backups.prune(root, id, server.backupRetention);
+    return true;
+  }));
+
+  ipcMain.handle('backups:remove', wrap(async (id, name) => {
+    getServerOrThrow(id);
+    return backups.remove(backupsRoot(), id, name);
+  }));
+
+  ipcMain.handle('backups:reveal', wrap(async (id) => {
+    getServerOrThrow(id);
+    const dir = backups.serverBackupDir(backupsRoot(), id);
+    fs.mkdirSync(dir, { recursive: true });
+    await shell.openPath(dir);
+    return dir;
   }));
 
   // ---- Server jar download ----

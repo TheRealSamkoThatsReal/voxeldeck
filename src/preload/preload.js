@@ -91,12 +91,20 @@ contextBridge.exposeInMainWorld('api', {
 
   // client-side mod profiles (per server) + apply to a Minecraft install
   clientModsList: (id) => invoke('clientmods:list', id),
-  clientModsSearch: (id, query, matchVersion) => invoke('clientmods:search', id, query, matchVersion),
-  clientModsAdd: (id, projectId, matchVersion) => invoke('clientmods:add', id, projectId, matchVersion),
+  clientModsSearch: (id, query, matchVersion, loader) => invoke('clientmods:search', id, query, matchVersion, loader),
+  clientModsAdd: (id, projectId, matchVersion, loader) => invoke('clientmods:add', id, projectId, matchVersion, loader),
   clientModsAddLocal: (id) => invoke('clientmods:addLocal', id),
   clientModsRemove: (id, filename) => invoke('clientmods:remove', id, filename),
   clientModsApply: (id, target) => invoke('clientmods:apply', id, target),
   onClientModsProgress: (cb) => on('clientmods:progress', cb),
+
+  // backups
+  backupsList: (id) => invoke('backups:list', id),
+  backupsCreate: (id) => invoke('backups:create', id),
+  backupsRestore: (id, name) => invoke('backups:restore', id, name),
+  backupsRemove: (id, name) => invoke('backups:remove', id, name),
+  backupsReveal: (id) => invoke('backups:reveal', id),
+  onBackupsProgress: (cb) => on('backups:progress', cb),
 
   // games (multi-game support)
   gamesCatalog: () => invoke('games:catalog'),

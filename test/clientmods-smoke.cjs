@@ -1,7 +1,7 @@
 // Renderer smoke test for the Client Mods feature: boots the real index.html +
-// preload, seeds a Fabric server in a throwaway userData, then drives the
-// Client Mods tab, the Modrinth "Add" browser and the Apply modal — failing if
-// the renderer logs any error or the process crashes.
+// preload, seeds a Paper server in a throwaway userData, then drives the
+// Client Mods tab, the Modrinth "Add" browser (loader picker + client-only) and
+// the Apply modal — failing if the renderer logs any error or the process crashes.
 // Usage: electron test/clientmods-smoke.cjs
 const { app, BrowserWindow, nativeTheme, ipcMain } = require('electron');
 const path = require('path');
@@ -11,13 +11,15 @@ const os = require('os');
 // Isolate from the real config: point userData at a temp dir and seed a server.
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-cm-smoke-'));
 app.setPath('userData', tmp);
-const srvDir = path.join(tmp, 'fabric-srv');
-fs.mkdirSync(path.join(srvDir, 'mods'), { recursive: true });
-fs.writeFileSync(path.join(srvDir, 'fabric-server-1.21.4.jar'), 'x');
+// Seed a *Paper* server on purpose: client mods (and the browser) must be
+// available even though Paper isn't a mod loader — that's the bug being fixed.
+const srvDir = path.join(tmp, 'paper-srv');
+fs.mkdirSync(path.join(srvDir, 'plugins'), { recursive: true });
+fs.writeFileSync(path.join(srvDir, 'paper-1.21.4-232.jar'), 'x');
 fs.writeFileSync(path.join(tmp, 'servers.json'), JSON.stringify({
   version: 1, settings: {}, servers: [{
-    id: 'cm1', name: 'Fabric Test', game: 'minecraft', type: 'fabric',
-    directory: srvDir, jar: 'fabric-server-1.21.4.jar',
+    id: 'cm1', name: 'Paper Test', game: 'minecraft', type: 'paper',
+    directory: srvDir, jar: 'paper-1.21.4-232.jar',
     clientMods: [{ source: 'modrinth', filename: 'sodium-0.6.jar', title: 'Sodium', versionNumber: '0.6', size: 1200 }]
   }]
 }));
@@ -47,14 +49,14 @@ function registerIpc() {
   fs.writeFileSync(path.join(cache, 'sodium-0.6.jar'), 'jar');
   ipcMain.handle('clientmods:list', wrap(async () => ({
     entries: [{ source: 'modrinth', filename: 'sodium-0.6.jar', title: 'Sodium', versionNumber: '0.6', size: 1200, cached: true }],
-    minecraftDir: mcDir, minecraftExists: false, targets: clientMods.targetDirs(mcDir, 'Fabric Test')
+    minecraftDir: mcDir, minecraftExists: false, targets: clientMods.targetDirs(mcDir, 'Paper Test')
   })));
   ipcMain.handle('clientmods:search', wrap(async () => ({ label: 'mods', gameVersion: '1.21.4', hits: [
     { projectId: 'AANobbMI', slug: 'sodium', title: 'Sodium', description: 'Fast rendering', author: 'jellysquid3', downloads: 9000000, icon: '', versions: [] }
   ] })));
   ipcMain.handle('clientmods:add', wrap(async () => ({ filename: 'sodium-0.6.jar', versionNumber: '0.6' })));
   ipcMain.handle('clientmods:apply', wrap(async (_id, target) => clientMods.applyProfile(cache, ['sodium-0.6.jar'],
-    target === 'main' ? clientMods.targetDirs(mcDir, 'Fabric Test').main : clientMods.targetDirs(mcDir, 'Fabric Test').isolated,
+    target === 'main' ? clientMods.targetDirs(mcDir, 'Paper Test').main : clientMods.targetDirs(mcDir, 'Paper Test').isolated,
     { own: target !== 'main', backupLabel: target === 'main' ? 'T' : null })));
 }
 
@@ -79,8 +81,8 @@ app.whenReady().then(async () => {
 
   await run("selectServer('cm1')");
   await wait(300);
-  // The Client Mods tab must be visible for a Fabric (mod-loader) Minecraft server.
-  ok('Client Mods tab is visible for a Fabric server',
+  // The Client Mods tab must be visible for any Minecraft server, incl. Paper.
+  ok('Client Mods tab is visible for a Paper (non-mod-loader) server',
     await win.webContents.executeJavaScript("getComputedStyle(document.getElementById('clientModsTab')).display !== 'none'"));
 
   await run("switchTab('clientmods')");
@@ -89,12 +91,19 @@ app.whenReady().then(async () => {
     await win.webContents.executeJavaScript("document.querySelectorAll('#clientModsList .content-row').length === 1"));
   ok('Apply button enabled (profile has mods)',
     await win.webContents.executeJavaScript("document.getElementById('applyClientModsBtn').disabled === false"));
+  // The browser must be offered even on Paper (was hidden by the old bug).
+  ok('Browse button is visible on a Paper server',
+    await win.webContents.executeJavaScript("getComputedStyle(document.getElementById('browseClientModsBtn')).display !== 'none'"));
 
   // Open the browser modal.
   await run("openClientModsBrowser()");
   await wait(500);
   ok('Browse modal shows a Modrinth result with an Add button',
     await win.webContents.executeJavaScript("!!document.querySelector('.modal .mr-row .primary-btn')"));
+  ok('Browser has a client-loader picker with 4 loaders',
+    await win.webContents.executeJavaScript("document.querySelectorAll('.cm-loader select option').length === 4"));
+  ok('Loader defaults to Fabric for a Paper server',
+    await win.webContents.executeJavaScript("document.querySelector('.cm-loader select').value === 'fabric'"));
   await run("document.querySelector('#modalHost').innerHTML=''; document.querySelector('#modalHost').classList.add('hidden')");
 
   // Open the Apply modal and apply into the isolated folder.
@@ -104,7 +113,7 @@ app.whenReady().then(async () => {
     await win.webContents.executeJavaScript("document.querySelectorAll(\"input[name='cmTarget']\").length === 2"));
   await run("[...document.querySelectorAll('.modal-actions button')].find(b=>b.textContent==='Apply').click()");
   await wait(500);
-  const applied = fs.existsSync(path.join(clientMods.targetDirs(path.join(tmp, 'mc'), 'Fabric Test').isolated, 'sodium-0.6.jar'));
+  const applied = fs.existsSync(path.join(clientMods.targetDirs(path.join(tmp, 'mc'), 'Paper Test').isolated, 'sodium-0.6.jar'));
   ok('Apply installed the mod into the isolated .minecraft profile folder', applied);
 
   ok('no renderer errors were logged', errors.length === 0);

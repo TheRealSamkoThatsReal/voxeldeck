@@ -379,6 +379,10 @@ function wireGlobalEvents() {
   // properties
   $('#savePropsBtn').addEventListener('click', saveProperties);
 
+  // backups
+  $('#createBackupBtn').addEventListener('click', onCreateBackup);
+  $('#revealBackupsBtn').addEventListener('click', () => { const s = currentServer(); if (s) call(api.backupsReveal(s.id), { silent: true }); });
+
   // keyboard: Ctrl+S saves the open file when on files tab
   window.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
@@ -557,7 +561,7 @@ function renderHome() {
 // Which capability gates each detail tab. Console/files/connect/settings are
 // universal; the rest depend on the game.
 const TAB_CAPABILITY = {
-  console: null, connect: null, files: null, settings: null,
+  console: null, connect: null, files: null, settings: null, backups: null,
   players: 'players', commands: 'quickCommands', content: 'mods', clientmods: 'clientMods', properties: 'properties'
 };
 
@@ -674,6 +678,7 @@ function switchTab(tab) {
   else if (tab === 'content') loadContent();
   else if (tab === 'clientmods') loadClientMods();
   else if (tab === 'properties') loadProperties();
+  else if (tab === 'backups') loadBackups();
   else if (tab === 'settings') renderSettings();
 }
 
@@ -1504,9 +1509,6 @@ async function loadClientMods() {
   const srv = currentServer();
   if (!srv) return;
   const list = $('#clientModsList');
-  // Client mods only make sense for a mod loader (Fabric/Quilt/Forge/NeoForge).
-  // Other types can still add local jars (e.g. Sodium), but there's nothing to browse.
-  $('#browseClientModsBtn').style.display = MOD_TYPES.has(srv.type) ? '' : 'none';
   try {
     const data = await call(api.clientModsList(srv.id));
     clientModsCache = data;
@@ -1527,9 +1529,7 @@ function renderClientModsList(srv, data) {
   list.innerHTML = '';
   if (!data.entries.length) {
     list.appendChild(emptyList('🎒',
-      MOD_TYPES.has(srv.type)
-        ? 'No client mods yet. Click “Browse” to add the mods players need to join, then “Apply to my Minecraft”.'
-        : 'No client mods yet. Add .jar files with “Add from disk”, then “Apply to my Minecraft”.'));
+      'No client mods yet. Click “Browse” to find client-side mods on Modrinth (or “Add from disk”), then “Apply to my Minecraft”.'));
     return;
   }
   for (const item of data.entries) {
@@ -1570,11 +1570,26 @@ async function removeClientMod(item) {
   } catch { /* shown */ }
 }
 
-// Browse Modrinth for client mods and add them to the profile (downloads now,
-// so applying later is offline). Mirrors the server Mods browser.
+// Client loaders offered by the browser. The player picks this — it's their
+// client's loader, not the server's software (Fabric mods work when joining a
+// vanilla/Paper server too).
+const CLIENT_LOADERS = [
+  { value: 'fabric', label: 'Fabric' },
+  { value: 'quilt', label: 'Quilt' },
+  { value: 'forge', label: 'Forge' },
+  { value: 'neoforge', label: 'NeoForge' }
+];
+function defaultClientLoader(type) { return MOD_TYPES.has(type) ? type : 'fabric'; }
+
+// Browse Modrinth for *client-side* mods and add them to the profile (downloads
+// now, so applying later is offline). Available for any Minecraft server.
 function openClientModsBrowser() {
   const srv = currentServer();
   if (!srv) return;
+
+  const loaderSelect = el('select', {}, ...CLIENT_LOADERS.map((l) => el('option', { value: l.value }, l.label)));
+  loaderSelect.value = defaultClientLoader(srv.type);
+  const loaderRow = el('label', { class: 'cm-loader' }, el('span', {}, 'Client loader'), loaderSelect);
 
   const input = el('input', { type: 'text', placeholder: 'Search… (e.g. Sodium, Iris, JEI, Fabric API)' });
   const matchCb = el('input', { type: 'checkbox' });
@@ -1583,23 +1598,24 @@ function openClientModsBrowser() {
   const results = el('div', { class: 'mr-results' }, el('div', { class: 'muted', style: 'padding:16px' }, 'Loading…'));
   const body = el('div', {},
     el('div', { class: 'mr-search' }, input),
-    matchWrap,
+    el('div', { class: 'cm-filters' }, loaderRow, matchWrap),
     results,
-    el('div', { class: 'hint', style: 'margin-top:10px' }, 'Client mods from ',
+    el('div', { class: 'hint', style: 'margin-top:10px' }, 'Client-side mods from ',
       link('Modrinth', 'https://modrinth.com'),
-      ' — matched to this server’s loader. Added mods are stored in the profile; use ',
+      ' — only mods that run on the client are shown, for the loader you pick. Added mods go into this server’s profile; use ',
       el('b', {}, 'Apply to my Minecraft'), ' to install them.'));
 
   modal({ title: 'Add client mods', body, wide: true, actions: [{ label: 'Done', class: 'ghost-btn' }] });
 
   const getMatch = () => matchCb.checked;
+  const getLoader = () => loaderSelect.value;
   let seq = 0;
   async function doSearch() {
     const mine = ++seq;
     results.innerHTML = '';
     results.appendChild(el('div', { class: 'muted', style: 'padding:16px' }, 'Searching…'));
     try {
-      const data = await call(api.clientModsSearch(srv.id, input.value, matchCb.checked), { silent: true });
+      const data = await call(api.clientModsSearch(srv.id, input.value, matchCb.checked, getLoader()), { silent: true });
       if (mine !== seq) return;
       if (data.gameVersion) {
         matchLabel.textContent = `Only show builds for Minecraft ${data.gameVersion}`;
@@ -1608,7 +1624,7 @@ function openClientModsBrowser() {
         matchLabel.textContent = 'Couldn’t detect your Minecraft version — pick a server jar in Settings';
         matchCb.checked = false; matchCb.disabled = true; matchWrap.classList.add('disabled');
       }
-      renderClientModrinthResults(srv, results, data.hits, getMatch);
+      renderClientModrinthResults(srv, results, data.hits, getMatch, getLoader);
     } catch (err) {
       if (mine !== seq) return;
       results.innerHTML = '';
@@ -1616,13 +1632,14 @@ function openClientModsBrowser() {
     }
   }
   matchCb.addEventListener('change', doSearch);
+  loaderSelect.addEventListener('change', doSearch);
   let t = null;
   input.addEventListener('input', () => { clearTimeout(t); t = setTimeout(doSearch, 350); });
   setTimeout(() => input.focus(), 30);
   doSearch();
 }
 
-function renderClientModrinthResults(srv, container, hits, getMatch) {
+function renderClientModrinthResults(srv, container, hits, getMatch, getLoader) {
   container.innerHTML = '';
   if (!hits.length) { container.appendChild(emptyList('🔍', 'No matches — try a different search.')); return; }
   for (const h of hits) {
@@ -1634,7 +1651,7 @@ function renderClientModrinthResults(srv, container, hits, getMatch) {
         if (p.projectId === h.projectId && p.total) addBtn.textContent = `${Math.round((p.received / p.total) * 100)}%`;
       });
       try {
-        const r = await call(api.clientModsAdd(srv.id, h.projectId, getMatch ? getMatch() : false));
+        const r = await call(api.clientModsAdd(srv.id, h.projectId, getMatch ? getMatch() : false, getLoader ? getLoader() : undefined));
         unsub();
         addBtn.textContent = '✓ Added';
         toast('Added to profile', `${h.title} (${r.versionNumber})`);
@@ -1698,6 +1715,155 @@ async function openApplyClientModsModal() {
       } }
     ]
   });
+}
+
+// ============================================================================
+// Backups — zip the whole server folder; restore or delete past snapshots.
+// ============================================================================
+let backupBusy = false;
+
+function fmtBackupDate(ts) {
+  try { return new Date(ts).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }); }
+  catch { return new Date(ts).toString(); }
+}
+
+function backupPhaseText(p) {
+  if (p.phase === 'safety') return 'Saving a safety copy of the current world first…';
+  if (p.phase === 'archiving') return `Archiving… ${p.done}/${p.total} files`;
+  if (p.phase === 'writing') return 'Writing the archive to disk…';
+  if (p.phase === 'restoring') return `Restoring… ${p.done}/${p.total} files`;
+  return 'Working…';
+}
+
+async function loadBackups() {
+  const srv = currentServer();
+  if (!srv) return;
+  const list = $('#backupsList');
+  $('#backupSchedule').innerHTML = '';
+  if (!srv.directory) {
+    $('#backupsHint').textContent = '';
+    list.innerHTML = '';
+    list.appendChild(emptyList('🗀', 'Set a server folder in Settings first.'));
+    return;
+  }
+  $('#backupSchedule').appendChild(renderBackupSchedule(srv));
+  try {
+    const data = await call(api.backupsList(srv.id));
+    const n = data.entries.length;
+    $('#backupsHint').textContent =
+      `${n} backup${n === 1 ? '' : 's'}  ·  ${data.dir}` +
+      (data.running ? '  ·  server is running (restore is disabled until it’s stopped)' : '');
+    renderBackupsList(srv, data);
+  } catch (err) {
+    list.innerHTML = '';
+    list.appendChild(emptyList('⚠', err.message));
+  }
+}
+
+function renderBackupSchedule(srv) {
+  const card = el('div', { class: 'sched-card' });
+
+  const schedCb = el('input', { type: 'checkbox' });
+  schedCb.checked = !!srv.scheduledBackup;
+  const schedTime = el('input', { type: 'time', class: 'time-input', value: srv.scheduledBackupTime || '04:30' });
+  schedTime.disabled = !schedCb.checked;
+  schedCb.addEventListener('change', () => { schedTime.disabled = !schedCb.checked; patch(srv, { scheduledBackup: schedCb.checked }); });
+  schedTime.addEventListener('change', () => {
+    const v = /^([01]\d|2[0-3]):[0-5]\d$/.test(schedTime.value) ? schedTime.value : '04:30';
+    schedTime.value = v; patch(srv, { scheduledBackupTime: v });
+  });
+
+  const keep = el('input', { type: 'number', min: 0, max: 99, value: srv.backupRetention, style: 'width:72px' });
+  keep.addEventListener('change', () => {
+    let v = parseInt(keep.value, 10); if (!Number.isFinite(v) || v < 0) v = 0; if (v > 99) v = 99;
+    keep.value = v; patch(srv, { backupRetention: v });
+  });
+
+  card.appendChild(el('div', { class: 'checkbox-field' }, schedCb,
+    el('label', { style: 'margin:0' }, 'Back up automatically every day at'), schedTime));
+  card.appendChild(el('div', { class: 'sched-keep' },
+    el('label', { style: 'margin:0' }, 'Keep the newest'), keep,
+    el('label', { style: 'margin:0' }, 'automatic backups (0 = keep all; manual backups are never auto-deleted).')));
+  card.appendChild(el('div', { class: 'hint' },
+    'A backup is a .zip of the entire server folder (world, mods, configs). Scheduled backups run while the app is open, whether the server is up or not.'));
+  return card;
+}
+
+function renderBackupsList(srv, data) {
+  const list = $('#backupsList');
+  list.innerHTML = '';
+  if (!data.entries.length) {
+    list.appendChild(emptyList('💾', 'No backups yet. Click “Back up now” to snapshot this server.'));
+    return;
+  }
+  for (const b of data.entries) {
+    const tag = b.type === 'auto' ? 'auto' : 'manual';
+    const restoreBtn = el('button', { class: 'ghost-btn small', style: 'width:auto' }, '↩ Restore');
+    restoreBtn.disabled = data.running || backupBusy;
+    restoreBtn.title = data.running ? 'Stop the server first' : 'Replace the server folder with this backup';
+    restoreBtn.addEventListener('click', () => restoreBackup(srv, b));
+    const row = el('div', { class: 'content-row' },
+      el('div', { class: 'cr-info' },
+        el('div', { class: 'cr-name' }, fmtBackupDate(b.createdAt), el('span', { class: `bk-tag ${tag}` }, tag)),
+        el('div', { class: 'cr-meta' }, fmtSize(b.size))
+      ),
+      restoreBtn,
+      el('button', { class: 'icon-btn', title: 'Delete backup', onclick: () => deleteBackup(srv, b) }, '🗑')
+    );
+    list.appendChild(row);
+  }
+}
+
+// Shared runner for create/restore: streams worker progress into the hint line,
+// disables the backup button (showing `busyLabel`), and reloads the list when done.
+async function runBackupOp(srv, busyLabel, fn) {
+  if (backupBusy) return;
+  backupBusy = true;
+  const btn = $('#createBackupBtn');
+  const origBtn = btn.textContent;
+  btn.disabled = true; btn.textContent = busyLabel;
+  const unsub = api.onBackupsProgress((p) => {
+    if (p.id === srv.id) $('#backupsHint').textContent = backupPhaseText(p);
+  });
+  try {
+    await fn();
+  } finally {
+    unsub();
+    backupBusy = false;
+    btn.disabled = false; btn.textContent = origBtn;
+    await loadBackups();
+  }
+}
+
+async function onCreateBackup() {
+  const srv = currentServer();
+  if (!srv || !srv.directory) return toast('No directory', 'Set a server folder first.', 'warn');
+  await runBackupOp(srv, '💾 Backing up…', async () => {
+    const meta = await call(api.backupsCreate(srv.id));
+    if (meta) toast('Backup created', `${fmtSize(meta.size)} · ${meta.files} files`);
+  });
+}
+
+async function restoreBackup(srv, b) {
+  if (srv.state && srv.state !== 'stopped') return toast('Server running', 'Stop the server before restoring.', 'warn');
+  const ok = await confirmModal('Restore this backup?',
+    `This replaces everything in the server folder with the backup from ${fmtBackupDate(b.createdAt)}. ` +
+    'Your current world is saved to an automatic safety backup first, so you can undo it.',
+    { danger: true, confirmLabel: 'Restore' });
+  if (!ok) return;
+  await runBackupOp(srv, '↩ Restoring…', async () => {
+    const r = await call(api.backupsRestore(srv.id, b.name));
+    if (r) toast('Restored', `Server restored from ${fmtBackupDate(b.createdAt)}.`);
+  });
+}
+
+async function deleteBackup(srv, b) {
+  if (!(await confirmModal('Delete backup?', `Permanently delete the backup from ${fmtBackupDate(b.createdAt)}?`,
+    { danger: true, confirmLabel: 'Delete' }))) return;
+  try {
+    await call(api.backupsRemove(srv.id, b.name));
+    await loadBackups();
+  } catch { /* shown */ }
 }
 
 // ============================================================================
@@ -2618,6 +2784,14 @@ async function openAppSettingsModal() {
     if (dir) mcInput.value = dir;
   } }, 'Browse…');
 
+  // Backups location (blank = <userData>/backups).
+  const bkInput = el('input', { type: 'text', value: settings.backupsRoot || '',
+    placeholder: 'default: app data folder / backups' });
+  const bkBrowse = el('button', { class: 'ghost-btn', style: 'width:auto;white-space:nowrap', onclick: async () => {
+    const dir = await call(api.pickDirectory());
+    if (dir) bkInput.value = dir;
+  } }, 'Browse…');
+
   const body = el('div', {},
     buildAccentField(normalizeHex(settings.accentColor || DEFAULT_ACCENT)),
     el('div', { class: 'field' },
@@ -2638,6 +2812,11 @@ async function openAppSettingsModal() {
         ' tab installs mods. Blank = your OS default (', el('code', {}, '~/.minecraft'), ', ',
         el('code', {}, '%APPDATA%\\.minecraft'), ', …).')),
     el('div', { class: 'field' },
+      el('label', {}, 'Backups folder'),
+      el('div', { class: 'with-btn' }, bkInput, bkBrowse),
+      el('div', { class: 'hint' }, 'Where server backups are stored. Blank = a ',
+        el('code', {}, 'backups'), ' folder in the app’s data directory. Kept outside server folders so backups survive deleting a server.')),
+    el('div', { class: 'field' },
       el('label', {}, 'Getting started'),
       el('button', { class: 'ghost-btn', style: 'width:auto', onclick: () => {
         const host = $('#modalHost'); host.classList.add('hidden'); host.innerHTML = '';
@@ -2655,7 +2834,7 @@ async function openAppSettingsModal() {
     actions: [
       { label: 'Close', class: 'ghost-btn' },
       { label: 'Save', class: 'primary-btn', onClick: async () => {
-        const patch = { javaPath: javaInput.value.trim(), serversRoot: rootInput.value.trim(), minecraftDir: mcInput.value.trim() };
+        const patch = { javaPath: javaInput.value.trim(), serversRoot: rootInput.value.trim(), minecraftDir: mcInput.value.trim(), backupsRoot: bkInput.value.trim() };
         await call(api.setSettings(patch));
         state.settings = { ...state.settings, ...patch };
         toast('Settings saved', '');
