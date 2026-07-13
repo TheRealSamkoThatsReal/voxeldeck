@@ -83,6 +83,7 @@
           <button class="tab" data-tab="commands">Commands</button>
           <button class="tab" data-tab="files">Files</button>
           <button class="tab" data-tab="content" id="contentTab">Mods</button>
+          <button class="tab" data-tab="clientmods" id="clientModsTab">Client Mods</button>
           <button class="tab" data-tab="properties">Properties</button>
           <button class="tab" data-tab="settings">Settings</button>
         </nav>
@@ -162,6 +163,22 @@
               </div>
             </div>
             <ul id="contentList" class="content-list"></ul>
+          </div>
+
+          <!-- Client-side mod profile -->
+          <div class="tab-pane" data-pane="clientmods">
+            <div class="content-head">
+              <div>
+                <h2>Client Mods</h2>
+                <p class="muted" id="clientModsHint"></p>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button class="primary-btn" id="applyClientModsBtn">⬇ Apply to my Minecraft</button>
+                <button class="ghost-btn" id="browseClientModsBtn" style="width:auto">🔎 Browse</button>
+                <button class="ghost-btn" id="addClientModsBtn" style="width:auto">＋ Add from disk</button>
+              </div>
+            </div>
+            <ul id="clientModsList" class="content-list"></ul>
           </div>
 
           <!-- Properties -->

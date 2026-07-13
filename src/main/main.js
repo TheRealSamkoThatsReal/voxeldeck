@@ -13,6 +13,7 @@ const downloader = require('./downloader');
 const network = require('./network');
 const javaManager = require('./javaManager');
 const modrinth = require('./modrinth');
+const clientMods = require('./clientMods');
 const scheduler = require('./scheduler');
 const games = require('./games');
 const gameInstaller = require('./gameInstaller');
@@ -88,6 +89,18 @@ function getServerOrThrow(id) {
   const server = data.servers.find((s) => s.id === id);
   if (!server) throw new Error('Server not found');
   return { data, server };
+}
+
+/** Add (or replace by filename) a client-mod entry on a server and persist. */
+function upsertClientMod(data, id, entry) {
+  const idx = data.servers.findIndex((s) => s.id === id);
+  if (idx === -1) throw new Error('Server not found');
+  const current = (data.servers[idx].clientMods || []).filter((e) => e.filename !== entry.filename);
+  data.servers[idx] = store.normalizeServer({
+    ...data.servers[idx], clientMods: [...current, entry], id
+  });
+  store.writeData(data);
+  return entry;
 }
 
 function wrap(handler) {
@@ -362,6 +375,89 @@ function registerIpc() {
       added.push(await utils.addContent(server.directory, server.type, src));
     }
     return added;
+  }));
+
+  // ---- Client-side mod profiles ----
+  // The folder where a server's client mods are cached (downloaded once, then
+  // copied into a Minecraft install on "Apply").
+  function clientCacheDir(id) {
+    return clientMods.cacheDir(app.getPath('userData'), id);
+  }
+  // The client Minecraft directory (user override, else the OS default).
+  function minecraftDir() {
+    const custom = (store.readData().settings.minecraftDir || '').trim();
+    return custom || clientMods.defaultMinecraftDir();
+  }
+
+  ipcMain.handle('clientmods:list', wrap(async (id) => {
+    const { server } = getServerOrThrow(id);
+    const mcDir = minecraftDir();
+    const targets = clientMods.targetDirs(mcDir, server.name);
+    const cached = new Set(await clientMods.cacheFiles(clientCacheDir(id)));
+    // Flag any entry whose downloaded file went missing so the UI can warn.
+    const entries = (server.clientMods || []).map((e) => ({ ...e, cached: cached.has(e.filename) }));
+    return { entries, minecraftDir: mcDir, minecraftExists: fs.existsSync(mcDir), targets };
+  }));
+
+  ipcMain.handle('clientmods:search', wrap(async (id, query, matchVersion) => {
+    const { server } = getServerOrThrow(id);
+    const gameVersion = modrinth.detectGameVersion(server.jar);
+    const data = await modrinth.search({
+      query, type: server.type, gameVersion: matchVersion ? gameVersion : null, clientSide: true
+    });
+    return { ...data, gameVersion };
+  }));
+
+  ipcMain.handle('clientmods:add', wrap(async (id, projectId, matchVersion) => {
+    const { data, server } = getServerOrThrow(id);
+    if (!modrinth.targetFor(server.type)) throw new Error('This server type has no mod loader to match client mods to.');
+    const gameVersion = matchVersion ? modrinth.detectGameVersion(server.jar) : null;
+    const entry = await clientMods.addFromModrinth(clientCacheDir(id), projectId, server.type, gameVersion, (p) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('clientmods:progress', { id, projectId, ...p });
+    });
+    return upsertClientMod(data, id, entry);
+  }));
+
+  ipcMain.handle('clientmods:addLocal', wrap(async (id) => {
+    const { data } = getServerOrThrow(id);
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Add client mods (.jar)',
+      filters: [{ name: 'Java Archive', extensions: ['jar'] }],
+      properties: ['openFile', 'multiSelections']
+    });
+    if (result.canceled) return [];
+    const added = [];
+    for (const src of result.filePaths) {
+      const entry = await clientMods.addLocal(clientCacheDir(id), src);
+      upsertClientMod(data, id, entry);
+      added.push(entry.filename);
+    }
+    return added;
+  }));
+
+  ipcMain.handle('clientmods:remove', wrap(async (id, filename) => {
+    const { data, server } = getServerOrThrow(id);
+    await clientMods.removeCached(clientCacheDir(id), filename);
+    const idx = data.servers.findIndex((s) => s.id === id);
+    data.servers[idx] = store.normalizeServer({
+      ...server, clientMods: (server.clientMods || []).filter((e) => e.filename !== filename), id
+    });
+    store.writeData(data);
+    return true;
+  }));
+
+  ipcMain.handle('clientmods:apply', wrap(async (id, target) => {
+    const { server } = getServerOrThrow(id);
+    const list = server.clientMods || [];
+    if (!list.length) throw new Error('This server has no client mods yet — add some first.');
+    const targets = clientMods.targetDirs(minecraftDir(), server.name);
+    const isMain = target === 'main';
+    const modsDir = isMain ? targets.main : targets.isolated;
+    const backupLabel = new Date().toISOString().slice(0, 19).replace('T', ' ').replace(/:/g, '-');
+    return clientMods.applyProfile(clientCacheDir(id), list.map((e) => e.filename), modsDir, {
+      own: !isMain,               // we fully manage the isolated folder; only back up the user's real one
+      backupLabel: isMain ? backupLabel : null
+    });
   }));
 
   // ---- Server jar download ----

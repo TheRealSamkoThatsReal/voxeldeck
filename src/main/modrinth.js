@@ -46,13 +46,19 @@ function detectGameVersion(jar) {
   return m ? m[1] : null;
 }
 
-/** Search Modrinth, scoped to the server's loader (+ optionally a game version). */
-async function search({ query = '', type, gameVersion = null, limit = 24 }) {
+/**
+ * Search Modrinth, scoped to the server's loader (+ optionally a game version).
+ * `clientSide` biases results to mods that run on the client (for the client
+ * mod profile browser) by excluding server-only projects.
+ */
+async function search({ query = '', type, gameVersion = null, clientSide = false, limit = 24 }) {
   const target = targetFor(type);
   if (!target) throw new Error('Browsing isn’t available for this server type — switch to Paper, Fabric, Forge, etc.');
   // project_type:X  AND  (categories:loader1 OR loader2 OR …)  [AND versions:gv]
   const facets = [[`project_type:${target.projectType}`], target.loaders.map((l) => `categories:${l}`)];
   if (gameVersion) facets.push([`versions:${gameVersion}`]);
+  // client_side ∈ {required, optional} ⇒ the mod runs client-side (drops server-only mods).
+  if (clientSide) facets.push(['client_side:required', 'client_side:optional']);
   const params = new URLSearchParams();
   if (query.trim()) params.set('query', query.trim());
   params.set('limit', String(limit));

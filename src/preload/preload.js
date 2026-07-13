@@ -89,6 +89,15 @@ contextBridge.exposeInMainWorld('api', {
   removeContent: (id, name) => invoke('content:remove', id, name),
   addContent: (id) => invoke('content:add', id),
 
+  // client-side mod profiles (per server) + apply to a Minecraft install
+  clientModsList: (id) => invoke('clientmods:list', id),
+  clientModsSearch: (id, query, matchVersion) => invoke('clientmods:search', id, query, matchVersion),
+  clientModsAdd: (id, projectId, matchVersion) => invoke('clientmods:add', id, projectId, matchVersion),
+  clientModsAddLocal: (id) => invoke('clientmods:addLocal', id),
+  clientModsRemove: (id, filename) => invoke('clientmods:remove', id, filename),
+  clientModsApply: (id, target) => invoke('clientmods:apply', id, target),
+  onClientModsProgress: (cb) => on('clientmods:progress', cb),
+
   // games (multi-game support)
   gamesCatalog: () => invoke('games:catalog'),
   installGame: (id) => invoke('game:install', id),
