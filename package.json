@@ -1,6 +1,6 @@
 {
   "name": "voxeldeck",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "VoxelDeck — a slick dark-themed dashboard for managing your game servers (Minecraft, Terraria, Valheim): one-click install, files, mods/plugins, players, a live console, and auto/scheduled restarts.",
   "main": "src/main/main.js",
   "author": "VoxelDeck",
