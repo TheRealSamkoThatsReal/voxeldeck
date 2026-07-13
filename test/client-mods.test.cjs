@@ -7,6 +7,7 @@ const os = require('os');
 const path = require('path');
 
 const cm = require(path.join(__dirname, '..', 'src', 'main', 'clientMods.js'));
+const modrinth = require(path.join(__dirname, '..', 'src', 'main', 'modrinth.js'));
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vd-clientmods-'));
 const cacheDir = path.join(tmp, 'cache');
@@ -23,6 +24,13 @@ const jars = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.
     cm.defaultMinecraftDir('darwin', '/Users/x') === path.join('/Users/x', 'Library', 'Application Support', 'minecraft'));
   ok('windows default lands under .minecraft',
     /\.minecraft$/.test(cm.defaultMinecraftDir('win32', 'C:\\Users\\x')));
+
+  // --- client loader selection is independent of the server's software ---
+  ok('mod-loader servers default to their own loader', modrinth.defaultClientLoader('quilt') === 'quilt');
+  ok('vanilla/Paper servers default to Fabric (dominant client loader)',
+    modrinth.defaultClientLoader('vanilla') === 'fabric' && modrinth.defaultClientLoader('paper') === 'fabric');
+  ok('Quilt client loader also accepts Fabric mods',
+    modrinth.CLIENT_LOADERS.quilt.loaders.includes('fabric'));
 
   // --- target dirs derive from the server name ---
   const targets = cm.targetDirs('/mc', 'My Cool Server!');

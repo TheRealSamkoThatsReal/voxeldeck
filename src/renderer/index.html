@@ -85,6 +85,7 @@
           <button class="tab" data-tab="content" id="contentTab">Mods</button>
           <button class="tab" data-tab="clientmods" id="clientModsTab">Client Mods</button>
           <button class="tab" data-tab="properties">Properties</button>
+          <button class="tab" data-tab="backups">Backups</button>
           <button class="tab" data-tab="settings">Settings</button>
         </nav>
 
@@ -191,6 +192,22 @@
               <button class="primary-btn" id="savePropsBtn">Save properties</button>
             </div>
             <div id="propsForm" class="props-form"></div>
+          </div>
+
+          <!-- Backups -->
+          <div class="tab-pane" data-pane="backups">
+            <div class="content-head">
+              <div>
+                <h2>Backups</h2>
+                <p class="muted" id="backupsHint"></p>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button class="primary-btn" id="createBackupBtn">💾 Back up now</button>
+                <button class="ghost-btn" id="revealBackupsBtn" style="width:auto">📂 Open folder</button>
+              </div>
+            </div>
+            <div id="backupSchedule" class="backup-schedule"></div>
+            <ul id="backupsList" class="content-list"></ul>
           </div>
 
           <!-- Settings -->

@@ -24,6 +24,16 @@ function isDue(server, hhmm) {
   );
 }
 
+/** Pure: is this server configured to back up at the given HH:MM? */
+function isBackupDue(server, hhmm) {
+  return !!(
+    server &&
+    server.scheduledBackup &&
+    /^([01]\d|2[0-3]):[0-5]\d$/.test(server.scheduledBackupTime || '') &&
+    server.scheduledBackupTime === hhmm
+  );
+}
+
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // One trigger per server per (day + time) so a >1-minute restart sequence can't
@@ -63,6 +73,25 @@ async function restartServer(server, javaPath) {
   }
 }
 
+/** Create an automatic backup for a server, then prune to its retention limit. */
+async function backupServer(server, settings) {
+  const backups = require('./backups'); // lazy — pulls in worker_threads/adm-zip
+  const { app } = require('electron');
+  const root = ((settings || {}).backupsRoot || '').trim() || backups.defaultBackupsRoot(app.getPath('userData'));
+  serverManager.systemLog(server.id, '💾 Scheduled backup starting…');
+  // Flush a running Minecraft world to disk first for a consistent snapshot.
+  if (server.game === 'minecraft' && serverManager.getState(server.id) === 'running') {
+    try { serverManager.sendCommand(server.id, 'save-all flush'); await delay(1500); } catch { /* ignore */ }
+  }
+  try {
+    const meta = await backups.create(server, root, { type: 'auto' });
+    await backups.prune(root, server.id, server.backupRetention);
+    serverManager.systemLog(server.id, `💾 Scheduled backup complete (${meta.name}).`);
+  } catch (e) {
+    serverManager.systemLog(server.id, `💾 Scheduled backup failed: ${e.message}`);
+  }
+}
+
 function tick(now = new Date()) {
   const store = require('./store'); // lazy — only the running app touches disk
   let data;
@@ -70,12 +99,18 @@ function tick(now = new Date()) {
   const hhmm = hhmmNow(now);
   const dayKey = `${now.toDateString()} ${hhmm}`;
   for (const server of data.servers || []) {
-    if (!isDue(server, hhmm)) continue;
-    if (lastFired.get(server.id) === dayKey) continue;
-    // Only restart a server that's actually up-and-running (not mid start/stop).
-    if (serverManager.getState(server.id) !== 'running') continue;
-    lastFired.set(server.id, dayKey);
-    restartServer(server, (data.settings || {}).javaPath);
+    if (isDue(server, hhmm) && lastFired.get(`restart:${server.id}`) !== dayKey &&
+        serverManager.getState(server.id) === 'running') {
+      // Only restart a server that's actually up-and-running (not mid start/stop).
+      lastFired.set(`restart:${server.id}`, dayKey);
+      restartServer(server, (data.settings || {}).javaPath);
+    }
+    // Backups run whether the server is up or not (a stopped server still has a
+    // world worth snapshotting).
+    if (isBackupDue(server, hhmm) && lastFired.get(`backup:${server.id}`) !== dayKey) {
+      lastFired.set(`backup:${server.id}`, dayKey);
+      backupServer(server, data.settings || {});
+    }
   }
 }
 
@@ -89,4 +124,4 @@ function stop() {
   if (timer) { clearInterval(timer); timer = null; }
 }
 
-module.exports = { start, stop, tick, isDue, hhmmNow, restartServer };
+module.exports = { start, stop, tick, isDue, isBackupDue, hhmmNow, restartServer, backupServer };

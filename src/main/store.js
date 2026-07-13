@@ -30,7 +30,10 @@ const DEFAULT_DATA = {
     tourSeen: false,
     // Client Minecraft install used by the client-mod installer. Empty = use the
     // OS default (~/.minecraft, %APPDATA%\.minecraft, …), resolved at runtime.
-    minecraftDir: ''
+    minecraftDir: '',
+    // Where server backups are stored. Empty = <userData>/backups, resolved at
+    // runtime. Kept outside server folders so backups survive deleting a server.
+    backupsRoot: ''
   },
   servers: []
 };
@@ -109,6 +112,15 @@ function normalizeServer(server) {
     scheduledRestartTime: /^([01]\d|2[0-3]):[0-5]\d$/.test(server.scheduledRestartTime)
       ? server.scheduledRestartTime
       : '04:00',
+    // Scheduled daily backup (opt-in), at a local-time HH:MM. Independent of run
+    // state — it snapshots the folder whether the server is up or not.
+    scheduledBackup: !!server.scheduledBackup,
+    scheduledBackupTime: /^([01]\d|2[0-3]):[0-5]\d$/.test(server.scheduledBackupTime)
+      ? server.scheduledBackupTime
+      : '04:30',
+    // How many automatic backups to keep (0 = keep all). Manual backups are
+    // never auto-deleted.
+    backupRetention: clampInt(server.backupRetention, 0, 10),
     // Client-side mod profile — the mods a player needs locally to join this
     // server. Each entry: { source:'modrinth'|'local', filename, title?, projectId?, versionNumber?, size? }.
     clientMods: normalizeClientMods(server.clientMods),

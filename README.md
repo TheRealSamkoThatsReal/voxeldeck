@@ -63,9 +63,10 @@ servers, console, files, auto- and scheduled restarts — is shared.
   switch (toggles a `.disabled` suffix), add new ones, and remove them.
 - **Client-side mod installer** (Minecraft) — every server gets its own **client
   mod profile**: the mods a *player* needs on their own machine to join that
-  modded server. Browse Modrinth for client-side mods (matched to the server's
-  loader and Minecraft version) or add local `.jar`s; they download into a
-  per-server cache. Then hit **⬇ Apply to my Minecraft** and pick where to install:
+  modded server. Browse Modrinth for **client-side mods** — only mods that run on
+  the client are shown, for the client loader you pick (Fabric, Quilt, Forge or
+  NeoForge, independent of the server's software) and matched to your Minecraft
+  version — or add local `.jar`s; they download into a per-server cache. Then hit **⬇ Apply to my Minecraft** and pick where to install:
   an **isolated profile folder** under `.minecraft/voxeldeck-profiles/<server>/`
   that VoxelDeck keeps in exact sync (point a launcher profile at it — nothing
   else is touched), or your **main `.minecraft/mods`**, where anything already
@@ -75,6 +76,15 @@ servers, console, files, auto- and scheduled restarts — is shared.
   (MOTD, gamemode, difficulty, max players, port, PvP, whitelist, view distance…).
 - **EULA & Java helpers** — one-click EULA acceptance and Java auto-detection with
   clear warnings if Java is missing or a custom path is needed.
+- **Backups & restore** — snapshot the entire server folder (world, mods,
+  configs) into a single `.zip` with one click, browse past backups with their
+  size and date, and **restore** any of them (a safety snapshot of the current
+  world is taken automatically first, so a restore is undoable). Optional
+  **scheduled daily backups** with a retention limit keep the newest N automatic
+  backups and prune the rest; manual backups are never auto-deleted. Zipping and
+  unzipping run on a worker thread so the UI never freezes, and backups are stored
+  outside the server folder (configurable in ⚙ App settings) so they survive
+  deleting a server. Works for Minecraft, Terraria and Valheim.
 - **Auto-restart** (optional) — bring a server back up automatically if it crashes.
 - **Scheduled daily restarts** (optional) — pick a time of day and the app warns
   players in chat, then gracefully stops and restarts the server (only if it's
@@ -219,6 +229,7 @@ src/
     files.js         sandboxed file operations
     serverUtils.js   java detection, server.properties, eula, mods/plugins
     clientMods.js    client-side mod profiles: cache, download & apply to .minecraft
+    backups.js       per-server backups: create/list/restore/prune (+ backupWorker.js)
   preload/
     preload.js       safe contextBridge API (the only renderer ↔ main surface)
   renderer/
@@ -229,7 +240,9 @@ test/
   core.test.mjs        unit tests for file/properties/eula/content logic
   lifecycle.test.cjs   start → run → console → stop, using a fake Java
   client-mods.test.cjs client mod cache + apply (isolated sync vs. backup-and-swap)
+  backups.test.cjs     backup round-trip: create → restore → prune (real worker)
   clientmods-smoke.cjs dev tool: drives the Client Mods tab/modals in Electron
+  backups-smoke.cjs    dev tool: drives the Backups tab (create/restore/delete)
   shoot.cjs            dev tool: screenshots each view via Electron
 ```
 

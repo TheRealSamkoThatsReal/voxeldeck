@@ -377,6 +377,25 @@ button, input, textarea, select { font-family: inherit; color: inherit; }
 .cm-target .cm-target-title { font-weight: 550; margin-bottom: 3px; }
 .cm-target .hint { word-break: break-word; }
 
+/* Client-mod browser filter row: loader picker + version toggle */
+.cm-filters { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin: 10px 0 4px; }
+.cm-loader { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-dim); }
+.cm-loader select { width: auto; }
+
+/* Backups: schedule card + per-row type tag */
+.backup-schedule { margin-bottom: 14px; }
+.sched-card {
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;
+}
+.sched-card .sched-keep { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--text-dim); }
+.bk-tag {
+  margin-left: 9px; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .3px;
+  padding: 2px 7px; border-radius: 999px; vertical-align: middle;
+}
+.bk-tag.manual { background: rgba(var(--accent-rgb), .18); color: var(--accent); }
+.bk-tag.auto { background: rgba(255,255,255,.08); color: var(--text-faint); }
+
 .empty-list { text-align: center; padding: 50px 20px; color: var(--text-faint); }
 .empty-list .el-icon { font-size: 40px; opacity: .4; margin-bottom: 10px; }
 

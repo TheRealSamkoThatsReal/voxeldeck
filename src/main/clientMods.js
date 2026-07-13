@@ -65,9 +65,9 @@ async function cacheFiles(dir) {
   }
 }
 
-/** Download a Modrinth project's best client build into the cache. */
-async function addFromModrinth(dir, projectId, type, gameVersion, onProgress) {
-  const file = await modrinth.bestFile(projectId, type, gameVersion);
+/** Download a Modrinth project's best build for a client loader into the cache. */
+async function addFromModrinth(dir, projectId, loader, gameVersion, onProgress) {
+  const file = await modrinth.bestFileClient(projectId, loader, gameVersion);
   await modrinth.downloadFile(file.url, file.filename, dir, onProgress);
   const size = await statSize(path.join(dir, file.filename));
   return {
