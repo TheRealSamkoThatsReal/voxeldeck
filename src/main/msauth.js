@@ -26,9 +26,32 @@
 // Replace with your Azure app's Application (client) ID, or set VOXELDECK_MS_CLIENT_ID.
 const CLIENT_ID = process.env.VOXELDECK_MS_CLIENT_ID || 'REPLACE_WITH_YOUR_AZURE_CLIENT_ID';
 
-const SCOPE = 'XboxLive.signin offline_access';
-const DEVICECODE_URL = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode';
-const TOKEN_URL = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token';
+/**
+ * Two device-code transports. The default 'msa' path uses the modern Azure AD
+ * v2.0 endpoints and is for an app you registered + got approved for the
+ * Minecraft API. The legacy 'live' path uses login.live.com and is what the
+ * long-standing community "MinecraftJava" client id (and libraries like
+ * prismarine-auth) speak — the modern endpoints reject that id.
+ *
+ * 'live' is OFF by default and never bundles a client id. It only turns on when
+ * a user opts in on their own machine (VOXELDECK_MS_AUTH=live, or a legacy-format
+ * id in VOXELDECK_MS_CLIENT_ID). Personal use only — do not ship a borrowed id.
+ */
+const LEGACY = process.env.VOXELDECK_MS_AUTH === 'live' || /^0{8}[0-9a-fA-F]{8}$/.test(CLIENT_ID);
+const OAUTH = LEGACY ? {
+  deviceCode: 'https://login.live.com/oauth20_connect.srf',
+  token: 'https://login.live.com/oauth20_token.srf',
+  scope: 'service::user.auth.xboxlive.com::MBI_SSL',
+  deviceExtra: { response_type: 'device_code' },
+  rpsTicket: (t) => t                    // legacy MBI_SSL token is sent raw
+} : {
+  deviceCode: 'https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode',
+  token: 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token',
+  scope: 'XboxLive.signin offline_access',
+  deviceExtra: {},
+  rpsTicket: (t) => `d=${t}`             // v2.0 token is prefixed with d=
+};
+
 const XBL_URL = 'https://user.auth.xboxlive.com/user/authenticate';
 const XSTS_URL = 'https://xsts.auth.xboxlive.com/xsts/authorize';
 const MC_LOGIN_URL = 'https://api.minecraftservices.com/authentication/login_with_xbox';
@@ -68,7 +91,7 @@ async function startDeviceLogin(onCode, shouldCancel = () => false) {
     throw new Error('Microsoft login isn’t configured yet: add an Azure app client ID (see msauth.js / docs).');
   }
 
-  const dc = await postForm(DEVICECODE_URL, { client_id: CLIENT_ID, scope: SCOPE });
+  const dc = await postForm(OAUTH.deviceCode, { client_id: CLIENT_ID, scope: OAUTH.scope, ...OAUTH.deviceExtra });
   if (!dc.ok) throw new Error(dc.body.error_description || 'Could not start Microsoft login.');
   const { device_code, user_code, verification_uri, expires_in } = dc.body;
   let interval = (dc.body.interval || 5) * 1000;
@@ -81,7 +104,7 @@ async function startDeviceLogin(onCode, shouldCancel = () => false) {
     if (Date.now() > deadline) throw new Error('Login timed out — the code expired. Try again.');
     await sleep(interval);
 
-    const tok = await postForm(TOKEN_URL, {
+    const tok = await postForm(OAUTH.token, {
       grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
       client_id: CLIENT_ID,
       device_code
@@ -102,7 +125,7 @@ async function startDeviceLogin(onCode, shouldCancel = () => false) {
 async function finishFromMsa(msAccessToken, msRefreshToken) {
   // 1) Xbox Live user token.
   const xbl = await postJson(XBL_URL, {
-    Properties: { AuthMethod: 'RPS', SiteName: 'user.auth.xboxlive.com', RpsTicket: `d=${msAccessToken}` },
+    Properties: { AuthMethod: 'RPS', SiteName: 'user.auth.xboxlive.com', RpsTicket: OAUTH.rpsTicket(msAccessToken) },
     RelyingParty: 'http://auth.xboxlive.com',
     TokenType: 'JWT'
   });
@@ -157,10 +180,10 @@ async function finishFromMsa(msAccessToken, msRefreshToken) {
 async function refreshAccount(account) {
   if (!account || !account.msRefresh) throw new Error('Please sign in to Microsoft again.');
   if (!isConfigured()) throw new Error('Microsoft login isn’t configured.');
-  const tok = await postForm(TOKEN_URL, {
+  const tok = await postForm(OAUTH.token, {
     grant_type: 'refresh_token',
     client_id: CLIENT_ID,
-    scope: SCOPE,
+    scope: OAUTH.scope,
     refresh_token: account.msRefresh
   });
   if (!tok.ok) throw new Error('Your Microsoft session expired — please sign in again.');

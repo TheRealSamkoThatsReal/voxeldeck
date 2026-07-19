@@ -144,6 +144,29 @@ still work; only launching needs it.
 That's it — the entire device-code → Xbox Live → XSTS → Minecraft token chain,
 token refresh, and per-launch validation are already implemented.
 
+### Personal-use alternative (legacy `login.live.com` flow)
+
+If you just want to launch on your own machine and don't want to register/await
+approval for an Azure app, VoxelDeck can also authenticate through the legacy
+`login.live.com` device-code flow that community tools (e.g. `prismarine-auth`)
+use. Enable it with an environment variable — **it is off by default and no
+client id is bundled in the app**:
+
+```bash
+VOXELDECK_MS_CLIENT_ID=<a-legacy-live-client-id> VOXELDECK_MS_AUTH=live
+```
+
+(A legacy-format id, e.g. one that is 16 hex chars starting with zeros, is
+auto-detected, so `VOXELDECK_MS_AUTH=live` is optional in that case.)
+
+> **Heads-up / terms:** this route reuses a client id that isn't your own
+> registered app. Mojang's terms say tools must not appear official/approved and
+> that authenticating to Minecraft services is meant to go through an approved
+> app. It's a common **personal-use** workaround for accounts that already own
+> the game, can break if Microsoft tightens things, and **should not be shipped**
+> baked into a distributed build — keep the id in your local environment only
+> (e.g. your `.desktop` launcher entry), never committed.
+
 > **Note:** the launcher is for playing with an account that **owns** Minecraft
 > (Java Edition); it is not a way to bypass ownership.
 
