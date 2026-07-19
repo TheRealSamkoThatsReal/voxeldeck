@@ -23,6 +23,10 @@
         <span class="hn-icon">⌂</span> Overview
       </button>
 
+      <button id="launcherNavBtn" class="home-nav">
+        <span class="hn-icon">🎮</span> Play (Singleplayer)
+      </button>
+
       <div class="sidebar-head">
         <span>Servers</span>
         <button id="addServerBtn" class="icon-btn" title="Add a server">＋</button>
@@ -47,6 +51,70 @@
           <button id="homeAddBtn" class="primary-btn">＋ Add a server</button>
         </header>
         <div id="homeGrid" class="home-grid"></div>
+      </section>
+
+      <!-- Singleplayer launcher: instances -->
+      <section id="launcherView" class="home-view hidden">
+        <header class="home-header">
+          <div>
+            <h1>Play — Singleplayer</h1>
+            <p class="muted" id="launcherSummary">—</p>
+          </div>
+          <button id="newInstanceBtn" class="primary-btn">＋ New instance</button>
+        </header>
+        <div id="accountBar" class="account-bar"></div>
+        <div id="instanceGrid" class="home-grid"></div>
+      </section>
+
+      <!-- Instance detail -->
+      <section id="instanceDetail" class="server-detail hidden">
+        <header class="detail-header">
+          <div class="detail-title">
+            <span class="status-dot" id="instStatusDot"></span>
+            <h1 id="instName">Instance</h1>
+            <span class="status-label" id="instStatusLabel">stopped</span>
+          </div>
+          <div class="detail-actions">
+            <span class="stat-chip" id="instVersion" title="Version">—</span>
+            <span class="stat-chip" id="instRam" title="Allocated RAM">🧠 —</span>
+            <button class="ghost-btn small" id="instFolderBtn" style="width:auto" title="Open the instance folder">📂 Folder</button>
+            <button class="primary-btn" id="instPlayBtn">▶ Play</button>
+          </div>
+        </header>
+
+        <nav class="tabs" id="instanceTabs">
+          <button class="tab active" data-itab="console">Console</button>
+          <button class="tab" data-itab="mods" id="instModsTab">Mods</button>
+          <button class="tab" data-itab="settings">Settings</button>
+        </nav>
+
+        <div class="tab-body">
+          <!-- Console / launch log -->
+          <div class="tab-pane active" data-ipane="console">
+            <div id="instProgress" class="inst-progress hidden"></div>
+            <div id="instConsoleOutput" class="console-output"></div>
+          </div>
+
+          <!-- Mods -->
+          <div class="tab-pane" data-ipane="mods">
+            <div class="content-head">
+              <div>
+                <h2>Mods</h2>
+                <p class="muted" id="instModsHint"></p>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button class="primary-btn" id="instBrowseModsBtn">🔎 Browse</button>
+                <button class="ghost-btn" id="instAddModsBtn" style="width:auto">＋ Add from disk</button>
+              </div>
+            </div>
+            <ul id="instModsList" class="content-list"></ul>
+          </div>
+
+          <!-- Settings -->
+          <div class="tab-pane" data-ipane="settings">
+            <div id="instSettingsForm" class="settings-form"></div>
+          </div>
+        </div>
       </section>
 
       <!-- Empty state -->

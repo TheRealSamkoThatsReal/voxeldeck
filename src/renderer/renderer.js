@@ -24,7 +24,14 @@ const state = {
   history: {},          // id -> [commands]
   historyIdx: {},       // id -> index
   // cached log render position to avoid full re-render
-  renderedLogCount: {}  // id -> number
+  renderedLogCount: {},  // id -> number
+  // singleplayer launcher
+  instances: [],           // [{id, name, mcVersion, loader, ..., state}]
+  selectedInstanceId: null,
+  instanceTab: 'console',
+  account: null,           // { name, uuid } | null
+  accountConfigured: true, // whether Microsoft login is set up (Azure client id)
+  renderedInstanceLogCount: {}
 };
 
 // ---- Tiny DOM helpers ------------------------------------------------------
@@ -336,6 +343,18 @@ function wireGlobalEvents() {
   $('#brandHome').addEventListener('click', showHome);
   $('#settingsBtn').addEventListener('click', openAppSettingsModal);
 
+  // launcher (singleplayer)
+  $('#launcherNavBtn').addEventListener('click', showLauncher);
+  $('#newInstanceBtn').addEventListener('click', openNewInstanceModal);
+  $('#instanceTabs').addEventListener('click', (e) => {
+    const tab = e.target.closest('.tab');
+    if (tab) switchInstanceTab(tab.dataset.itab);
+  });
+  $('#instPlayBtn').addEventListener('click', onInstancePlayToggle);
+  $('#instFolderBtn').addEventListener('click', () => { const i = currentInstance(); if (i) call(api.launcherOpenFolder(i.id), { silent: true }); });
+  $('#instBrowseModsBtn').addEventListener('click', openInstanceModsBrowser);
+  $('#instAddModsBtn').addEventListener('click', onInstanceAddModLocal);
+
   // tabs
   $('#tabs').addEventListener('click', (e) => {
     const tab = e.target.closest('.tab');
@@ -419,6 +438,22 @@ function wireIpcEvents() {
     appendLogLine({ line, stream, ts });
   });
 
+  // launcher (singleplayer) events
+  api.onLauncherState(({ id, state: st }) => {
+    const inst = state.instances.find((i) => i.id === id);
+    if (inst) inst.state = st;
+    renderInstanceGrid();
+    if (id === state.selectedInstanceId) { updateInstancePowerUI(); if (state.instanceTab === 'console') { /* progress cleared on stop */ if (st === 'stopped') hideInstProgress(); } }
+  });
+  api.onLauncherProgress(({ id, phase, done, total, received }) => {
+    if (id !== state.selectedInstanceId) return;
+    showInstProgress(phase, done, total, received);
+  });
+  api.onLauncherLog(({ id, line, stream, ts }) => {
+    if (id !== state.selectedInstanceId || state.instanceTab !== 'console') return;
+    appendInstanceLogLine({ line, stream, ts });
+  });
+
   api.onUpdateStatus((s) => handleUpdateStatus(s));
 
   api.onQuitting(() => {
@@ -475,8 +510,11 @@ function selectServer(id) {
   state.renderedLogCount[id] = 0;
   $('#emptyState').classList.add('hidden');
   $('#homeView').classList.add('hidden');
+  $('#launcherView').classList.add('hidden');
+  $('#instanceDetail').classList.add('hidden');
   $('#serverDetail').classList.remove('hidden');
   $('#homeNavBtn').classList.remove('active');
+  $('#launcherNavBtn').classList.remove('active');
   renderServerList();
   renderDetail();
   switchTab('console');
@@ -495,8 +533,11 @@ function showHome() {
   state.selectedId = null;
   $('#emptyState').classList.add('hidden');
   $('#serverDetail').classList.add('hidden');
+  $('#launcherView').classList.add('hidden');
+  $('#instanceDetail').classList.add('hidden');
   $('#homeView').classList.remove('hidden');
   $('#homeNavBtn').classList.add('active');
+  $('#launcherNavBtn').classList.remove('active');
   renderServerList();
   renderHome();
 }
@@ -506,8 +547,11 @@ function showEmpty() {
   state.selectedId = null;
   $('#serverDetail').classList.add('hidden');
   $('#homeView').classList.add('hidden');
+  $('#launcherView').classList.add('hidden');
+  $('#instanceDetail').classList.add('hidden');
   $('#emptyState').classList.remove('hidden');
   $('#homeNavBtn').classList.remove('active');
+  $('#launcherNavBtn').classList.remove('active');
   renderServerList();
 }
 
@@ -3242,6 +3286,508 @@ function buildUpdateField() {
     btn,
     statusLine,
     el('div', { class: 'hint' }, 'VoxelDeck checks GitHub for new releases on launch and updates itself (Windows installer & Linux AppImage).'));
+}
+
+// ============================================================================
+// Singleplayer launcher (instances + Microsoft account)
+// ============================================================================
+const INSTANCE_ST_LABEL = {
+  stopped: 'Stopped', installing: 'Installing…', launching: 'Launching…',
+  running: 'Running', stopping: 'Closing…'
+};
+function instStLabel(st) { return INSTANCE_ST_LABEL[st] || st; }
+// The status-dot / status-label CSS only knows the server states; map ours on.
+function instDotClass(st) {
+  if (st === 'running') return 'running';
+  if (st === 'installing' || st === 'launching' || st === 'stopping') return 'starting';
+  return 'stopped';
+}
+function loaderLabel(inst) {
+  const l = { vanilla: 'Vanilla', fabric: 'Fabric', quilt: 'Quilt' }[inst.loader] || inst.loader;
+  return inst.mcVersion ? `${l} ${inst.mcVersion}` : l;
+}
+function currentInstance() { return state.instances.find((i) => i.id === state.selectedInstanceId); }
+
+async function showLauncher() {
+  state.view = 'launcher';
+  state.selectedId = null;
+  $('#homeView').classList.add('hidden');
+  $('#emptyState').classList.add('hidden');
+  $('#serverDetail').classList.add('hidden');
+  $('#instanceDetail').classList.add('hidden');
+  $('#launcherView').classList.remove('hidden');
+  $('#homeNavBtn').classList.remove('active');
+  $('#launcherNavBtn').classList.add('active');
+  await loadAccountBar();
+  await refreshInstances();
+}
+
+async function refreshInstances() {
+  try { state.instances = await call(api.launcherInstances(), { silent: true }); }
+  catch { state.instances = []; }
+  renderInstanceGrid();
+}
+
+function renderInstanceGrid() {
+  const grid = $('#instanceGrid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  const n = state.instances.length;
+  $('#launcherSummary').textContent = n
+    ? `${n} instance${n > 1 ? 's' : ''} · your own singleplayer worlds`
+    : 'Create an instance to play singleplayer with one-click mods.';
+  if (!n) {
+    grid.appendChild(emptyList('🎮', 'No instances yet. Click “New instance” to make a vanilla, Fabric, or Quilt world.'));
+    return;
+  }
+  for (const inst of state.instances) {
+    const st = inst.state || 'stopped';
+    const card = el('div', { class: 'home-card', onclick: () => selectInstance(inst.id) },
+      el('div', { class: 'hc-top' },
+        el('span', { class: `status-dot ${instDotClass(st)}` }),
+        el('div', { class: 'hc-name' }, inst.name),
+        el('span', { class: `status-label ${instDotClass(st)}` }, instStLabel(st))
+      ),
+      el('div', { class: 'hc-meta' },
+        el('span', {}, loaderLabel(inst)),
+        el('span', {}, `${inst.maxRamMb} MB`)
+      ),
+      el('div', { class: 'hc-open' }, 'Open →')
+    );
+    grid.appendChild(card);
+  }
+}
+
+function selectInstance(id) {
+  state.view = 'instance';
+  state.selectedInstanceId = id;
+  state.instanceTab = 'console';
+  $('#homeView').classList.add('hidden');
+  $('#emptyState').classList.add('hidden');
+  $('#serverDetail').classList.add('hidden');
+  $('#launcherView').classList.add('hidden');
+  $('#instanceDetail').classList.remove('hidden');
+  renderInstanceDetail();
+  switchInstanceTab('console');
+}
+
+function renderInstanceDetail() {
+  const inst = currentInstance();
+  if (!inst) return;
+  $('#instName').textContent = inst.name;
+  $('#instVersion').textContent = loaderLabel(inst);
+  $('#instRam').textContent = `🧠 ${inst.maxRamMb} MB`;
+  // Vanilla instances have no mods tab.
+  $('#instModsTab').style.display = (inst.loader === 'fabric' || inst.loader === 'quilt') ? '' : 'none';
+  updateInstancePowerUI();
+}
+
+function updateInstancePowerUI() {
+  const inst = currentInstance();
+  if (!inst) return;
+  const st = inst.state || 'stopped';
+  $('#instStatusDot').className = `status-dot ${instDotClass(st)}`;
+  $('#instStatusLabel').className = `status-label ${instDotClass(st)}`;
+  $('#instStatusLabel').textContent = instStLabel(st);
+  const btn = $('#instPlayBtn');
+  const busy = st === 'installing' || st === 'launching' || st === 'stopping';
+  if (st === 'running' || busy) {
+    btn.textContent = st === 'installing' ? '⏳ Installing…' : (st === 'stopping' ? '⏳ Closing…' : '■ Stop');
+    btn.className = 'danger-btn';
+  } else {
+    btn.textContent = '▶ Play';
+    btn.className = 'primary-btn';
+  }
+  btn.disabled = st === 'stopping';
+}
+
+function switchInstanceTab(tab) {
+  state.instanceTab = tab;
+  $$('#instanceTabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.itab === tab));
+  $$('#instanceDetail .tab-pane').forEach((p) => p.classList.toggle('active', p.dataset.ipane === tab));
+  if (tab === 'console') loadInstanceConsole();
+  else if (tab === 'mods') loadInstanceMods();
+  else if (tab === 'settings') loadInstanceSettings();
+}
+
+async function loadInstanceConsole() {
+  const inst = currentInstance();
+  if (!inst) return;
+  const out = $('#instConsoleOutput');
+  out.innerHTML = '';
+  try {
+    const buffer = await call(api.launcherLogBuffer(inst.id), { silent: true });
+    for (const entry of buffer) appendInstanceLogLine(entry, false);
+  } catch { /* ignore */ }
+  if (!out.children.length) {
+    appendInstanceLogLine({ line: 'Press ▶ Play to install (first time) and launch this instance.', stream: 'sys', ts: Date.now() }, false);
+  }
+  out.scrollTop = out.scrollHeight;
+}
+
+function appendInstanceLogLine(entry, autoscroll = true) {
+  const out = $('#instConsoleOutput');
+  if (!out) return;
+  const nearBottom = out.scrollHeight - out.scrollTop - out.clientHeight < 60;
+  const cls = entry.stream === 'err' ? 'err' : entry.stream === 'sys' ? 'sys' : colorizeLevel(entry.line);
+  out.appendChild(el('div', { class: `log-line ${cls}` }, entry.line));
+  while (out.children.length > 2200) out.removeChild(out.firstChild);
+  if (autoscroll && nearBottom) out.scrollTop = out.scrollHeight;
+}
+
+const PROGRESS_LABELS = {
+  client: 'Downloading Minecraft client', libraries: 'Downloading libraries',
+  assets: 'Downloading assets', java: 'Downloading Java runtime'
+};
+function showInstProgress(phase, done, total, received) {
+  const box = $('#instProgress');
+  if (!box) return;
+  box.classList.remove('hidden');
+  let pct = 0;
+  if (total) pct = Math.min(100, Math.round(((done != null ? done : received) / total) * 100));
+  box.innerHTML = '';
+  box.appendChild(el('div', { class: 'ip-label' }, `${PROGRESS_LABELS[phase] || 'Preparing'}… ${total ? pct + '%' : ''}`));
+  box.appendChild(el('div', { class: 'ip-track' }, el('div', { class: 'ip-fill', style: `width:${pct}%` })));
+}
+function hideInstProgress() { const box = $('#instProgress'); if (box) box.classList.add('hidden'); }
+
+async function onInstancePlayToggle() {
+  const inst = currentInstance();
+  if (!inst) return;
+  const st = inst.state || 'stopped';
+  if (st === 'running' || st === 'installing' || st === 'launching') {
+    try { await call(api.launcherStop(inst.id)); } catch { /* shown */ }
+    return;
+  }
+  // Must be signed in first.
+  if (!state.account) {
+    switchInstanceTab('console');
+    appendInstanceLogLine({ line: 'Sign in with your Microsoft account first (Play tab → account bar).', stream: 'err', ts: Date.now() });
+    toast('Sign in required', 'Add your Microsoft account in the Play view to launch.', 'warn');
+    return;
+  }
+  switchInstanceTab('console');
+  try {
+    await call(api.launcherPlay(inst.id));
+  } catch { hideInstProgress(); /* error toasted */ }
+}
+
+// ---- Instance mods ----
+async function loadInstanceMods() {
+  const inst = currentInstance();
+  if (!inst) return;
+  const list = $('#instModsList');
+  const isModded = inst.loader === 'fabric' || inst.loader === 'quilt';
+  $('#instBrowseModsBtn').disabled = !isModded;
+  if (!isModded) {
+    $('#instModsHint').textContent = 'This is a vanilla instance — recreate it as Fabric or Quilt to add mods.';
+    list.innerHTML = ''; list.appendChild(emptyList('🧊', 'Vanilla instances have no mod loader.'));
+    return;
+  }
+  try {
+    const data = await call(api.launcherModsList(inst.id));
+    const n = data.entries.length;
+    $('#instModsHint').textContent = `${n} mod${n === 1 ? '' : 's'} in this instance  ·  ${loaderLabel(inst)}`;
+    renderInstanceModsList(inst, data.entries);
+  } catch (err) {
+    list.innerHTML = ''; list.appendChild(emptyList('⚠', err.message));
+  }
+}
+
+function renderInstanceModsList(inst, entries) {
+  const list = $('#instModsList');
+  list.innerHTML = '';
+  if (!entries.length) {
+    list.appendChild(emptyList('🧩', 'No mods yet. Click “Browse” to install mods from Modrinth, or “Add from disk”.'));
+    return;
+  }
+  for (const item of entries) {
+    const meta = [fmtSize(item.size)];
+    if (!item.enabled) meta.push('disabled');
+    const toggle = el('button', { class: 'icon-btn', title: item.enabled ? 'Disable' : 'Enable' }, item.enabled ? '⏸' : '▶');
+    toggle.addEventListener('click', async () => {
+      try { await call(api.launcherModsToggle(inst.id, item.filename, !item.enabled)); await loadInstanceMods(); } catch { /* shown */ }
+    });
+    const row = el('div', { class: 'content-row' + (item.enabled ? '' : ' disabled') },
+      el('div', { class: 'cr-info' },
+        el('div', { class: 'cr-name' }, item.filename),
+        el('div', { class: 'cr-meta' }, meta.join('  ·  '))
+      ),
+      toggle,
+      el('button', { class: 'icon-btn', title: 'Remove', onclick: () => removeInstanceMod(inst, item) }, '🗑')
+    );
+    list.appendChild(row);
+  }
+}
+
+async function removeInstanceMod(inst, item) {
+  if (!(await confirmModal('Remove mod?', `Delete "${item.filename}" from this instance?`, { danger: true, confirmLabel: 'Remove' }))) return;
+  try { await call(api.launcherModsRemove(inst.id, item.filename)); await loadInstanceMods(); } catch { /* shown */ }
+}
+
+async function onInstanceAddModLocal() {
+  const inst = currentInstance();
+  if (!inst) return;
+  try {
+    const added = await call(api.launcherModsAddLocal(inst.id));
+    if (added.length) { toast('Added', `${added.length} mod(s) added.`); await loadInstanceMods(); }
+  } catch { /* shown */ }
+}
+
+function openInstanceModsBrowser() {
+  const inst = currentInstance();
+  if (!inst || (inst.loader !== 'fabric' && inst.loader !== 'quilt')) return;
+  const input = el('input', { type: 'text', placeholder: 'Search… (e.g. Sodium, Fabric API, JEI)' });
+  const matchCb = el('input', { type: 'checkbox', checked: true });
+  const matchLabel = el('span', {}, `Only show builds for Minecraft ${inst.mcVersion}`);
+  const matchWrap = el('label', { class: 'mr-vfilter' }, matchCb, matchLabel);
+  const results = el('div', { class: 'mr-results' }, el('div', { class: 'muted', style: 'padding:16px' }, 'Loading…'));
+  const body = el('div', {},
+    el('div', { class: 'mr-search' }, input),
+    el('div', { class: 'cm-filters' }, matchWrap),
+    results,
+    el('div', { class: 'hint', style: 'margin-top:10px' }, 'Client mods from ',
+      link('Modrinth', 'https://modrinth.com'), ` — installed straight into this ${loaderLabel(inst)} instance.`));
+  modal({ title: 'Add mods', body, wide: true, actions: [{ label: 'Done', class: 'ghost-btn' }] });
+
+  let seq = 0;
+  async function doSearch() {
+    const mine = ++seq;
+    results.innerHTML = '';
+    results.appendChild(el('div', { class: 'muted', style: 'padding:16px' }, 'Searching…'));
+    try {
+      const data = await call(api.launcherModsSearch(inst.id, input.value, matchCb.checked), { silent: true });
+      if (mine !== seq) return;
+      renderInstanceModrinthResults(inst, results, data.hits, () => matchCb.checked);
+    } catch (err) {
+      if (mine !== seq) return;
+      results.innerHTML = ''; results.appendChild(emptyList('⚠', err.message));
+    }
+  }
+  matchCb.addEventListener('change', doSearch);
+  let t = null;
+  input.addEventListener('input', () => { clearTimeout(t); t = setTimeout(doSearch, 350); });
+  setTimeout(() => input.focus(), 30);
+  doSearch();
+}
+
+function renderInstanceModrinthResults(inst, container, hits, getMatch) {
+  container.innerHTML = '';
+  if (!hits.length) { container.appendChild(emptyList('🔍', 'No matches — try a different search.')); return; }
+  for (const h of hits) {
+    const addBtn = el('button', { class: 'primary-btn small' }, 'Add');
+    addBtn.addEventListener('click', async () => {
+      const orig = addBtn.textContent;
+      addBtn.disabled = true; addBtn.textContent = 'Adding…';
+      const unsub = api.onLauncherModProgress((p) => {
+        if (p.projectId === h.projectId && p.total) addBtn.textContent = `${Math.round((p.received / p.total) * 100)}%`;
+      });
+      try {
+        const r = await call(api.launcherModsAdd(inst.id, h.projectId, getMatch ? getMatch() : false));
+        unsub();
+        addBtn.textContent = '✓ Added';
+        toast('Installed', `${h.title} (${r.versionNumber})`);
+        loadInstanceMods();
+      } catch { unsub(); addBtn.disabled = false; addBtn.textContent = orig; }
+    });
+    const icon = h.icon
+      ? el('img', { class: 'mr-icon', src: h.icon, alt: '', loading: 'lazy' })
+      : el('div', { class: 'mr-icon mr-icon-ph' }, '🧩');
+    container.appendChild(el('div', { class: 'mr-row' },
+      icon,
+      el('div', { class: 'mr-info' },
+        el('div', { class: 'mr-title' }, h.title, el('span', { class: 'mr-author' }, ` by ${h.author}`)),
+        el('div', { class: 'mr-desc' }, h.description || ''),
+        el('div', { class: 'mr-meta' }, `⬇ ${Number(h.downloads).toLocaleString()} downloads`)),
+      addBtn));
+  }
+}
+
+// ---- Instance settings ----
+function loadInstanceSettings() {
+  const inst = currentInstance();
+  if (!inst) return;
+  const form = $('#instSettingsForm');
+  form.innerHTML = '';
+
+  const nameInput = el('input', { type: 'text', value: inst.name });
+  const minInput = el('input', { type: 'number', min: '512', step: '256', value: String(inst.minRamMb) });
+  const maxInput = el('input', { type: 'number', min: '512', step: '256', value: String(inst.maxRamMb) });
+  const javaInput = el('input', { type: 'text', value: inst.javaPath || '', placeholder: 'Auto (matched to the Minecraft version)' });
+  const argsInput = el('input', { type: 'text', value: inst.javaArgs || '', placeholder: 'e.g. -XX:+UseG1GC' });
+
+  const save = async (patch) => {
+    try {
+      const updated = await call(api.launcherUpdate(inst.id, patch));
+      Object.assign(inst, updated);
+      renderInstanceDetail();
+    } catch { /* shown */ }
+  };
+
+  form.appendChild(el('div', { class: 'field' },
+    el('label', {}, 'Instance name'), nameInput,
+    (() => { nameInput.addEventListener('change', () => save({ name: nameInput.value.trim() || inst.name })); return null; })()));
+
+  form.appendChild(el('div', { class: 'field-row' },
+    el('div', { class: 'field' }, el('label', {}, 'Min RAM (MB)'), minInput),
+    el('div', { class: 'field' }, el('label', {}, 'Max RAM (MB)'), maxInput)));
+  const saveRam = () => save({ minRamMb: parseInt(minInput.value, 10) || 1024, maxRamMb: parseInt(maxInput.value, 10) || 2048 });
+  minInput.addEventListener('change', saveRam);
+  maxInput.addEventListener('change', saveRam);
+
+  form.appendChild(el('div', { class: 'field' },
+    el('label', {}, 'Java path'), javaInput,
+    el('div', { class: 'hint' }, 'Leave blank to let VoxelDeck download the right Java automatically.')));
+  javaInput.addEventListener('change', () => save({ javaPath: javaInput.value.trim() }));
+
+  form.appendChild(el('div', { class: 'field' },
+    el('label', {}, 'Extra JVM arguments'), argsInput));
+  argsInput.addEventListener('change', () => save({ javaArgs: argsInput.value.trim() }));
+
+  form.appendChild(el('div', { class: 'field' },
+    el('label', {}, 'Version'),
+    el('div', { class: 'hint' }, `${loaderLabel(inst)}${inst.loaderVersion ? ' · loader ' + inst.loaderVersion : ''}. The Minecraft version and loader are fixed when an instance is created — make a new instance to change them.`)));
+
+  const del = el('button', { class: 'danger-btn', style: 'width:auto' }, 'Delete this instance');
+  del.addEventListener('click', () => deleteInstance(inst));
+  form.appendChild(el('div', { class: 'field' }, del));
+}
+
+async function deleteInstance(inst) {
+  const wipe = await confirmModal('Delete instance?',
+    `Delete "${inst.name}" and its worlds/mods from disk? This can’t be undone.`,
+    { danger: true, confirmLabel: 'Delete everything' });
+  if (!wipe) return;
+  try {
+    await call(api.launcherDelete(inst.id, true));
+    state.selectedInstanceId = null;
+    await showLauncher();
+  } catch { /* shown */ }
+}
+
+// ---- New instance flow ----
+async function openNewInstanceModal() {
+  const nameInput = el('input', { type: 'text', placeholder: 'My World', value: 'New Instance' });
+  const loaderSelect = el('select', {},
+    el('option', { value: 'vanilla' }, 'Vanilla (no mods)'),
+    el('option', { value: 'fabric' }, 'Fabric (mods)'),
+    el('option', { value: 'quilt' }, 'Quilt (mods)'));
+  const versionSelect = el('select', {}, el('option', {}, 'Loading versions…'));
+  const snapshotCb = el('input', { type: 'checkbox' });
+
+  const body = el('div', {},
+    el('div', { class: 'field' }, el('label', {}, 'Name'), nameInput),
+    el('div', { class: 'field-row' },
+      el('div', { class: 'field' }, el('label', {}, 'Mod loader'), loaderSelect),
+      el('div', { class: 'field' }, el('label', {}, 'Minecraft version'), versionSelect)),
+    el('div', { class: 'field' }, el('label', { class: 'mr-vfilter' }, snapshotCb, el('span', {}, 'Include snapshots')),
+      el('div', { class: 'hint' }, 'Fabric/Quilt cover most recent releases. The right Java runtime is downloaded automatically on first launch.')));
+
+  let versionData = null;
+  const fillVersions = () => {
+    if (!versionData) return;
+    const list = snapshotCb.checked ? [...versionData.releases, ...versionData.snapshots] : versionData.releases;
+    versionSelect.innerHTML = '';
+    for (const v of list) versionSelect.appendChild(el('option', { value: v.id }, v.id + (v.type === 'snapshot' ? ' (snapshot)' : '')));
+    if (versionData.latest && versionData.latest.release) versionSelect.value = versionData.latest.release;
+  };
+  snapshotCb.addEventListener('change', fillVersions);
+  (async () => {
+    try { versionData = await call(api.launcherMcVersions(), { silent: true }); fillVersions(); }
+    catch { versionSelect.innerHTML = ''; versionSelect.appendChild(el('option', {}, 'Could not load versions')); }
+  })();
+
+  modal({
+    title: 'New instance',
+    body,
+    actions: [
+      { label: 'Cancel', class: 'ghost-btn' },
+      {
+        label: 'Create', class: 'primary-btn',
+        onClick: async () => {
+          const name = nameInput.value.trim() || 'New Instance';
+          const mcVersion = versionSelect.value;
+          const loader = loaderSelect.value;
+          if (!mcVersion || mcVersion.startsWith('Loading') || mcVersion.startsWith('Could')) {
+            toast('Pick a version', 'Choose a Minecraft version first.', 'warn'); return true;
+          }
+          try {
+            const inst = await call(api.launcherCreate({ name, mcVersion, loader }));
+            toast('Instance created', `${name} · ${loaderLabel(inst)}`);
+            await refreshInstances();
+            selectInstance(inst.id);
+          } catch { return true; /* keep modal open on error */ }
+        }
+      }
+    ]
+  });
+  setTimeout(() => { nameInput.focus(); nameInput.select(); }, 30);
+}
+
+// ---- Microsoft account ----
+async function loadAccountBar() {
+  try {
+    const info = await call(api.accountGet(), { silent: true });
+    state.account = info.account;
+    state.accountConfigured = info.configured;
+  } catch { state.account = null; }
+  renderAccountBar();
+}
+
+function renderAccountBar() {
+  const bar = $('#accountBar');
+  if (!bar) return;
+  bar.innerHTML = '';
+  if (state.account) {
+    bar.appendChild(el('div', { class: 'account-avatar' }, '🙂'));
+    bar.appendChild(el('div', { class: 'ab-info' },
+      el('div', { class: 'ab-name' }, state.account.name),
+      el('div', { class: 'ab-sub' }, 'Signed in with Microsoft — ready to play')));
+    const out = el('button', { class: 'ghost-btn', style: 'width:auto' }, 'Sign out');
+    out.addEventListener('click', onAccountLogout);
+    bar.appendChild(out);
+  } else {
+    bar.appendChild(el('div', { class: 'account-avatar' }, '🔑'));
+    bar.appendChild(el('div', { class: 'ab-info' },
+      el('div', { class: 'ab-name' }, 'Not signed in'),
+      el('div', { class: 'ab-sub' }, state.accountConfigured
+        ? 'Sign in with a Microsoft account that owns Minecraft to launch.'
+        : '⚠ Microsoft login isn’t configured yet (the app needs an Azure client ID — see the README).')));
+    const login = el('button', { class: 'primary-btn' }, 'Sign in with Microsoft');
+    login.disabled = !state.accountConfigured;
+    login.addEventListener('click', onAccountLogin);
+    bar.appendChild(login);
+  }
+}
+
+async function onAccountLogin() {
+  // Show the device code as it arrives, then complete in the background.
+  let codeShown = false;
+  const unsub = api.onAccountCode((info) => {
+    codeShown = true;
+    const body = el('div', {},
+      el('p', {}, 'Open this page and enter the code to sign in:'),
+      el('div', { class: 'device-code' }, info.userCode),
+      el('p', { class: 'hint' }, 'Go to ', link(info.verificationUri, info.verificationUri),
+        ' and enter the code above. This window updates automatically once you finish.'));
+    const openBtn = { label: 'Open sign-in page', class: 'primary-btn', onClick: () => { api.openExternal(info.verificationUri); return true; } };
+    modal({ title: 'Sign in with Microsoft', body, actions: [{ label: 'Cancel', class: 'ghost-btn', onClick: () => { api.accountCancelLogin(); } }, openBtn] });
+  });
+  try {
+    const acc = await call(api.accountLogin());
+    state.account = acc;
+    $('#modalHost').classList.add('hidden'); $('#modalHost').innerHTML = '';
+    renderAccountBar();
+    toast('Signed in', `Welcome, ${acc.name}!`);
+  } catch (err) {
+    if (codeShown) { $('#modalHost').classList.add('hidden'); $('#modalHost').innerHTML = ''; }
+    // error already toasted by call()
+  } finally { unsub(); }
+}
+
+async function onAccountLogout() {
+  if (!(await confirmModal('Sign out?', 'Remove this Microsoft account from VoxelDeck?', { confirmLabel: 'Sign out' }))) return;
+  try { await call(api.accountLogout()); state.account = null; renderAccountBar(); } catch { /* shown */ }
 }
 
 // ---- go ----
