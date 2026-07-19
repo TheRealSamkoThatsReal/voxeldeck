@@ -143,6 +143,14 @@ contextBridge.exposeInMainWorld('api', {
   launcherModsRemove: (id, filename) => invoke('launcher:modsRemove', id, filename),
   onLauncherModProgress: (cb) => on('launcher:modProgress', cb),
 
+  // per-instance resource packs (Modrinth)
+  launcherPacksList: (id) => invoke('launcher:packsList', id),
+  launcherPacksSearch: (id, query, matchVersion) => invoke('launcher:packsSearch', id, query, matchVersion),
+  launcherPacksAdd: (id, projectId, matchVersion) => invoke('launcher:packsAdd', id, projectId, matchVersion),
+  launcherPacksAddLocal: (id) => invoke('launcher:packsAddLocal', id),
+  launcherPacksRemove: (id, filename) => invoke('launcher:packsRemove', id, filename),
+  onLauncherPackProgress: (cb) => on('launcher:packProgress', cb),
+
   // Microsoft account (for launching)
   accountGet: () => invoke('account:get'),
   accountLogin: () => invoke('account:login'),

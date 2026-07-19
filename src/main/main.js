@@ -761,6 +761,69 @@ function registerIpc() {
     return true;
   }));
 
+  // ---- Per-instance resource packs (Modrinth, into <instance>/resourcepacks) ----
+  // Unlike mods, resource packs work on every instance (vanilla included) and are
+  // enabled in-game from the Options → Resource Packs screen once installed.
+  function instancePacksDir(instance) {
+    if (!instance.directory) throw new Error('This instance has no folder yet.');
+    return path.join(instance.directory, 'resourcepacks');
+  }
+
+  ipcMain.handle('launcher:packsList', wrap(async (id) => {
+    const { instance } = getInstanceOrThrow(id);
+    const dir = instancePacksDir(instance);
+    let names = [];
+    try { names = (await fs.promises.readdir(dir)).filter((n) => /\.zip$/i.test(n)); } catch { /* no folder yet */ }
+    const entries = [];
+    for (const name of names.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))) {
+      let size = 0;
+      try { size = (await fs.promises.stat(path.join(dir, name))).size; } catch { /* ignore */ }
+      entries.push({ filename: name, size });
+    }
+    return { entries, dir };
+  }));
+
+  ipcMain.handle('launcher:packsSearch', wrap(async (id, query, matchVersion) => {
+    const { instance } = getInstanceOrThrow(id);
+    const data = await modrinth.searchResourcePacks({ query, gameVersion: matchVersion ? instance.mcVersion : null });
+    return { ...data, gameVersion: instance.mcVersion };
+  }));
+
+  ipcMain.handle('launcher:packsAdd', wrap(async (id, projectId, matchVersion) => {
+    const { instance } = getInstanceOrThrow(id);
+    const file = await modrinth.bestFileResourcePack(projectId, matchVersion ? instance.mcVersion : null);
+    const filename = await modrinth.downloadFile(file.url, file.filename, instancePacksDir(instance), (p) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('launcher:packProgress', { id, projectId, ...p });
+    });
+    return { filename, versionNumber: file.versionNumber, gameVersions: file.gameVersions };
+  }));
+
+  ipcMain.handle('launcher:packsAddLocal', wrap(async (id) => {
+    const { instance } = getInstanceOrThrow(id);
+    const dir = instancePacksDir(instance);
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Add resource packs (.zip)',
+      filters: [{ name: 'Resource pack', extensions: ['zip'] }],
+      properties: ['openFile', 'multiSelections']
+    });
+    if (result.canceled) return [];
+    await fs.promises.mkdir(dir, { recursive: true });
+    const added = [];
+    for (const src of result.filePaths) {
+      const base = path.basename(src);
+      await fs.promises.copyFile(src, path.join(dir, base));
+      added.push(base);
+    }
+    return added;
+  }));
+
+  ipcMain.handle('launcher:packsRemove', wrap(async (id, filename) => {
+    const { instance } = getInstanceOrThrow(id);
+    const p = path.join(instancePacksDir(instance), path.basename(filename));
+    if (fs.existsSync(p)) await fs.promises.rm(p, { force: true });
+    return true;
+  }));
+
   // ---- Microsoft account ----
   let loginAbort = false;
   function sanitizeAccount(acc) {

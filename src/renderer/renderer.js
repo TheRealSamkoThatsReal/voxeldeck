@@ -354,6 +354,8 @@ function wireGlobalEvents() {
   $('#instFolderBtn').addEventListener('click', () => { const i = currentInstance(); if (i) call(api.launcherOpenFolder(i.id), { silent: true }); });
   $('#instBrowseModsBtn').addEventListener('click', openInstanceModsBrowser);
   $('#instAddModsBtn').addEventListener('click', onInstanceAddModLocal);
+  $('#instBrowsePacksBtn').addEventListener('click', openInstancePacksBrowser);
+  $('#instAddPacksBtn').addEventListener('click', onInstanceAddPackLocal);
 
   // tabs
   $('#tabs').addEventListener('click', (e) => {
@@ -3407,6 +3409,7 @@ function switchInstanceTab(tab) {
   $$('#instanceDetail .tab-pane').forEach((p) => p.classList.toggle('active', p.dataset.ipane === tab));
   if (tab === 'console') loadInstanceConsole();
   else if (tab === 'mods') loadInstanceMods();
+  else if (tab === 'packs') loadInstancePacks();
   else if (tab === 'settings') loadInstanceSettings();
 }
 
@@ -3593,6 +3596,125 @@ function renderInstanceModrinthResults(inst, container, hits, getMatch) {
     const icon = h.icon
       ? el('img', { class: 'mr-icon', src: h.icon, alt: '', loading: 'lazy' })
       : el('div', { class: 'mr-icon mr-icon-ph' }, '🧩');
+    container.appendChild(el('div', { class: 'mr-row' },
+      icon,
+      el('div', { class: 'mr-info' },
+        el('div', { class: 'mr-title' }, h.title, el('span', { class: 'mr-author' }, ` by ${h.author}`)),
+        el('div', { class: 'mr-desc' }, h.description || ''),
+        el('div', { class: 'mr-meta' }, `⬇ ${Number(h.downloads).toLocaleString()} downloads`)),
+      addBtn));
+  }
+}
+
+// ---- Instance resource packs (works on every instance, vanilla included) ----
+async function loadInstancePacks() {
+  const inst = currentInstance();
+  if (!inst) return;
+  const list = $('#instPacksList');
+  try {
+    const data = await call(api.launcherPacksList(inst.id));
+    const n = data.entries.length;
+    $('#instPacksHint').textContent = n
+      ? `${n} pack${n === 1 ? '' : 's'} installed  ·  enable them in-game under Options → Resource Packs`
+      : 'Resource packs work on any instance. Add some, then enable them in-game under Options → Resource Packs.';
+    renderInstancePacksList(inst, data.entries);
+  } catch (err) {
+    list.innerHTML = ''; list.appendChild(emptyList('⚠', err.message));
+  }
+}
+
+function renderInstancePacksList(inst, entries) {
+  const list = $('#instPacksList');
+  list.innerHTML = '';
+  if (!entries.length) {
+    list.appendChild(emptyList('🎨', 'No resource packs yet. Click “Browse” to find packs on Modrinth, or “Add from disk”.'));
+    return;
+  }
+  for (const item of entries) {
+    const row = el('div', { class: 'content-row' },
+      el('div', { class: 'cr-info' },
+        el('div', { class: 'cr-name' }, item.filename),
+        el('div', { class: 'cr-meta' }, fmtSize(item.size))
+      ),
+      el('button', { class: 'icon-btn', title: 'Remove', onclick: () => removeInstancePack(inst, item) }, '🗑')
+    );
+    list.appendChild(row);
+  }
+}
+
+async function removeInstancePack(inst, item) {
+  if (!(await confirmModal('Remove pack?', `Delete "${item.filename}" from this instance?`, { danger: true, confirmLabel: 'Remove' }))) return;
+  try { await call(api.launcherPacksRemove(inst.id, item.filename)); await loadInstancePacks(); } catch { /* shown */ }
+}
+
+async function onInstanceAddPackLocal() {
+  const inst = currentInstance();
+  if (!inst) return;
+  try {
+    const added = await call(api.launcherPacksAddLocal(inst.id));
+    if (added.length) { toast('Added', `${added.length} pack(s) added.`); await loadInstancePacks(); }
+  } catch { /* shown */ }
+}
+
+function openInstancePacksBrowser() {
+  const inst = currentInstance();
+  if (!inst) return;
+  const input = el('input', { type: 'text', placeholder: 'Search… (e.g. Faithful, Fresh Animations)' });
+  const matchCb = el('input', { type: 'checkbox', checked: true });
+  const matchLabel = el('span', {}, `Only show packs for Minecraft ${inst.mcVersion}`);
+  const matchWrap = el('label', { class: 'mr-vfilter' }, matchCb, matchLabel);
+  const results = el('div', { class: 'mr-results' }, el('div', { class: 'muted', style: 'padding:16px' }, 'Loading…'));
+  const body = el('div', {},
+    el('div', { class: 'mr-search' }, input),
+    el('div', { class: 'cm-filters' }, matchWrap),
+    results,
+    el('div', { class: 'hint', style: 'margin-top:10px' }, 'Resource packs from ',
+      link('Modrinth', 'https://modrinth.com'), '. After installing, enable them in-game under Options → Resource Packs.'));
+  modal({ title: 'Add resource packs', body, wide: true, actions: [{ label: 'Done', class: 'ghost-btn' }] });
+
+  let seq = 0;
+  async function doSearch() {
+    const mine = ++seq;
+    results.innerHTML = '';
+    results.appendChild(el('div', { class: 'muted', style: 'padding:16px' }, 'Searching…'));
+    try {
+      const data = await call(api.launcherPacksSearch(inst.id, input.value, matchCb.checked), { silent: true });
+      if (mine !== seq) return;
+      renderInstancePackResults(inst, results, data.hits, () => matchCb.checked);
+    } catch (err) {
+      if (mine !== seq) return;
+      results.innerHTML = ''; results.appendChild(emptyList('⚠', err.message));
+    }
+  }
+  matchCb.addEventListener('change', doSearch);
+  let t = null;
+  input.addEventListener('input', () => { clearTimeout(t); t = setTimeout(doSearch, 350); });
+  setTimeout(() => input.focus(), 30);
+  doSearch();
+}
+
+function renderInstancePackResults(inst, container, hits, getMatch) {
+  container.innerHTML = '';
+  if (!hits.length) { container.appendChild(emptyList('🔍', 'No matches — try a different search.')); return; }
+  for (const h of hits) {
+    const addBtn = el('button', { class: 'primary-btn small' }, 'Add');
+    addBtn.addEventListener('click', async () => {
+      const orig = addBtn.textContent;
+      addBtn.disabled = true; addBtn.textContent = 'Adding…';
+      const unsub = api.onLauncherPackProgress((p) => {
+        if (p.projectId === h.projectId && p.total) addBtn.textContent = `${Math.round((p.received / p.total) * 100)}%`;
+      });
+      try {
+        const r = await call(api.launcherPacksAdd(inst.id, h.projectId, getMatch ? getMatch() : false));
+        unsub();
+        addBtn.textContent = '✓ Added';
+        toast('Installed', `${h.title} (${r.versionNumber})`);
+        loadInstancePacks();
+      } catch { unsub(); addBtn.disabled = false; addBtn.textContent = orig; }
+    });
+    const icon = h.icon
+      ? el('img', { class: 'mr-icon', src: h.icon, alt: '', loading: 'lazy' })
+      : el('div', { class: 'mr-icon mr-icon-ph' }, '🎨');
     container.appendChild(el('div', { class: 'mr-row' },
       icon,
       el('div', { class: 'mr-info' },

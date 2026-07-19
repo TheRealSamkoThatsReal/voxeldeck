@@ -20,8 +20,11 @@ servers, console, files, auto- and scheduled restarts — is shared.
   **Java runtime automatically**, then launches. Each instance is its own isolated
   world folder, and for Fabric/Quilt instances you get **one-click modding**:
   browse Modrinth and install mods straight into that instance, toggle or remove
-  them, or drop in local `.jar`s. Requires a one-time Azure app registration —
-  see [Microsoft login setup](#microsoft-login-setup-for-the-singleplayer-launcher).
+  them, or drop in local `.jar`s. Every instance (vanilla included) also gets a
+  **Resource Packs** tab — browse Modrinth for packs or add local `.zip`s, then
+  enable them in-game under Options → Resource Packs. Requires a one-time Azure
+  app registration — see
+  [Microsoft login setup](#microsoft-login-setup-for-the-singleplayer-launcher).
 - **Multiple games — Minecraft, Terraria & Valheim.** Pick the game when you add
   a server and VoxelDeck adapts: it installs the right server (downloads the
   Minecraft jar, the Terraria dedicated server, or runs SteamCMD for Valheim),

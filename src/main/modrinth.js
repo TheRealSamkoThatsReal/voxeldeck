@@ -141,6 +141,22 @@ async function bestFileClient(projectId, loader, gameVersion = null) {
   return pickBestFile(projectId, fam.loaders, gameVersion);
 }
 
+/**
+ * Search Modrinth for *resource packs*. Unlike mods these aren't loader-specific
+ * (they work on vanilla and every loader), only Minecraft-version specific, so we
+ * facet on project_type + optionally the game version.
+ */
+async function searchResourcePacks({ query = '', gameVersion = null, limit = 24 }) {
+  const facets = [['project_type:resourcepack']];
+  if (gameVersion) facets.push([`versions:${gameVersion}`]);
+  return { label: 'resource packs', hits: await runSearch(facets, query, limit) };
+}
+
+/** Newest resource-pack file for a project (Modrinth tags these with the "minecraft" loader). */
+async function bestFileResourcePack(projectId, gameVersion = null) {
+  return pickBestFile(projectId, ['minecraft'], gameVersion);
+}
+
 /** Download a file into destDir, streaming with progress. */
 async function downloadFile(url, filename, destDir, onProgress) {
   await fsp.mkdir(destDir, { recursive: true });
@@ -173,5 +189,6 @@ async function downloadFile(url, filename, destDir, onProgress) {
 
 module.exports = {
   targetFor, detectGameVersion, search, bestFile, downloadFile,
-  CLIENT_LOADERS, defaultClientLoader, searchClient, bestFileClient
+  CLIENT_LOADERS, defaultClientLoader, searchClient, bestFileClient,
+  searchResourcePacks, bestFileResourcePack
 };

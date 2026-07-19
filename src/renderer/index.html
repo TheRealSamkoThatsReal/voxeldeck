@@ -85,6 +85,7 @@
         <nav class="tabs" id="instanceTabs">
           <button class="tab active" data-itab="console">Console</button>
           <button class="tab" data-itab="mods" id="instModsTab">Mods</button>
+          <button class="tab" data-itab="packs">Resource Packs</button>
           <button class="tab" data-itab="settings">Settings</button>
         </nav>
 
@@ -108,6 +109,21 @@
               </div>
             </div>
             <ul id="instModsList" class="content-list"></ul>
+          </div>
+
+          <!-- Resource Packs -->
+          <div class="tab-pane" data-ipane="packs">
+            <div class="content-head">
+              <div>
+                <h2>Resource Packs</h2>
+                <p class="muted" id="instPacksHint"></p>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button class="primary-btn" id="instBrowsePacksBtn">🔎 Browse</button>
+                <button class="ghost-btn" id="instAddPacksBtn" style="width:auto">＋ Add from disk</button>
+              </div>
+            </div>
+            <ul id="instPacksList" class="content-list"></ul>
           </div>
 
           <!-- Settings -->
