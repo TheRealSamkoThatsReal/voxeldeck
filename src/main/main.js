@@ -887,6 +887,90 @@ function registerIpc() {
     return true;
   }));
 
+  // ---- Per-world datapacks (Modrinth, into saves/<world>/datapacks) ----
+  // Datapacks are scoped to a single world, not the whole instance, so every op
+  // takes a world name. They apply after a /reload in-game (or rejoining).
+  function instanceWorldDatapacksDir(instance, world) {
+    if (!instance.directory) throw new Error('This instance has no folder yet.');
+    const safe = path.basename(String(world || ''));
+    if (!safe || safe === '.' || safe === '..') throw new Error('Pick a world first.');
+    const dir = path.join(instance.directory, 'saves', safe);
+    if (!fs.existsSync(dir)) throw new Error('That world no longer exists.');
+    return path.join(dir, 'datapacks');
+  }
+
+  ipcMain.handle('launcher:worldsList', wrap(async (id) => {
+    const { instance } = getInstanceOrThrow(id);
+    if (!instance.directory) return { worlds: [] };
+    const savesDir = path.join(instance.directory, 'saves');
+    let names = [];
+    try { names = await fs.promises.readdir(savesDir, { withFileTypes: true }); } catch { return { worlds: [] }; }
+    const worlds = [];
+    for (const e of names) {
+      if (!e.isDirectory()) continue;
+      // A real world has a level.dat; skip stray folders.
+      if (fs.existsSync(path.join(savesDir, e.name, 'level.dat'))) worlds.push(e.name);
+    }
+    worlds.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+    return { worlds };
+  }));
+
+  ipcMain.handle('launcher:datapacksList', wrap(async (id, world) => {
+    const { instance } = getInstanceOrThrow(id);
+    const dir = instanceWorldDatapacksDir(instance, world);
+    let names = [];
+    try { names = (await fs.promises.readdir(dir)).filter((n) => /\.zip$/i.test(n)); } catch { /* none yet */ }
+    const entries = [];
+    for (const name of names.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))) {
+      let size = 0;
+      try { size = (await fs.promises.stat(path.join(dir, name))).size; } catch { /* ignore */ }
+      entries.push({ filename: name, size });
+    }
+    return { entries, dir };
+  }));
+
+  ipcMain.handle('launcher:datapacksSearch', wrap(async (id, query, matchVersion) => {
+    const { instance } = getInstanceOrThrow(id);
+    const data = await modrinth.searchDatapacks({ query, gameVersion: matchVersion ? instance.mcVersion : null });
+    return { ...data, gameVersion: instance.mcVersion };
+  }));
+
+  ipcMain.handle('launcher:datapacksAdd', wrap(async (id, world, projectId, matchVersion) => {
+    const { instance } = getInstanceOrThrow(id);
+    const dir = instanceWorldDatapacksDir(instance, world);
+    const file = await modrinth.bestFileDatapack(projectId, matchVersion ? instance.mcVersion : null);
+    const filename = await modrinth.downloadFile(file.url, file.filename, dir, (p) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('launcher:datapackProgress', { id, projectId, ...p });
+    });
+    return { filename, versionNumber: file.versionNumber, gameVersions: file.gameVersions };
+  }));
+
+  ipcMain.handle('launcher:datapacksAddLocal', wrap(async (id, world) => {
+    const { instance } = getInstanceOrThrow(id);
+    const dir = instanceWorldDatapacksDir(instance, world);
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Add datapacks (.zip)',
+      filters: [{ name: 'Datapack', extensions: ['zip'] }],
+      properties: ['openFile', 'multiSelections']
+    });
+    if (result.canceled) return [];
+    await fs.promises.mkdir(dir, { recursive: true });
+    const added = [];
+    for (const src of result.filePaths) {
+      const base = path.basename(src);
+      await fs.promises.copyFile(src, path.join(dir, base));
+      added.push(base);
+    }
+    return added;
+  }));
+
+  ipcMain.handle('launcher:datapacksRemove', wrap(async (id, world, filename) => {
+    const { instance } = getInstanceOrThrow(id);
+    const p = path.join(instanceWorldDatapacksDir(instance, world), path.basename(filename));
+    if (fs.existsSync(p)) await fs.promises.rm(p, { force: true });
+    return true;
+  }));
+
   // ---- Microsoft account ----
   let loginAbort = false;
   function sanitizeAccount(acc) {

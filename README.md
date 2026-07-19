@@ -24,7 +24,9 @@ servers, console, files, auto- and scheduled restarts — is shared.
   **Resource Packs** tab — browse Modrinth for packs or add local `.zip`s, then
   enable them in-game under Options → Resource Packs. Fabric/Quilt instances add a
   **Shaders** tab too (they render through the Iris mod), with the same Modrinth
-  browse / local-add flow. Requires a one-time Azure app registration — see
+  browse / local-add flow. A **Datapacks** tab installs datapacks into a chosen
+  world (they're per-save), applied with `/reload` in-game. Requires a one-time
+  Azure app registration — see
   [Microsoft login setup](#microsoft-login-setup-for-the-singleplayer-launcher).
 - **Multiple games — Minecraft, Terraria & Valheim.** Pick the game when you add
   a server and VoxelDeck adapts: it installs the right server (downloads the

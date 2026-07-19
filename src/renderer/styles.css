@@ -731,3 +731,11 @@ a { color: var(--blue); cursor: pointer; }
   .toast, .update-banner { animation: modalHostIn .2s ease; } /* fade, no slide-in */
   .status-dot.starting, .status-dot.stopping { animation: none; }
 }
+
+/* World selector in the Datapacks tab */
+.world-select {
+  background: var(--bg-input); border: 1px solid var(--border); color: var(--text);
+  border-radius: var(--radius-sm); padding: 8px 10px; font-size: 12.5px; outline: none;
+  max-width: 220px;
+}
+.world-select:focus { border-color: var(--accent-dim); }

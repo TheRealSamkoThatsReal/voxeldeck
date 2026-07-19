@@ -87,6 +87,7 @@
           <button class="tab" data-itab="mods" id="instModsTab">Mods</button>
           <button class="tab" data-itab="packs">Resource Packs</button>
           <button class="tab" data-itab="shaders" id="instShadersTab">Shaders</button>
+          <button class="tab" data-itab="datapacks">Datapacks</button>
           <button class="tab" data-itab="settings">Settings</button>
         </nav>
 
@@ -140,6 +141,22 @@
               </div>
             </div>
             <ul id="instShadersList" class="content-list"></ul>
+          </div>
+
+          <!-- Datapacks (per world) -->
+          <div class="tab-pane" data-ipane="datapacks">
+            <div class="content-head">
+              <div>
+                <h2>Datapacks</h2>
+                <p class="muted" id="instDatapacksHint"></p>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <select id="instWorldSelect" class="world-select"></select>
+                <button class="primary-btn" id="instBrowseDatapacksBtn">🔎 Browse</button>
+                <button class="ghost-btn" id="instAddDatapacksBtn" style="width:auto">＋ Add from disk</button>
+              </div>
+            </div>
+            <ul id="instDatapacksList" class="content-list"></ul>
           </div>
 
           <!-- Settings -->

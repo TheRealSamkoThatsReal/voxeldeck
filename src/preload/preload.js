@@ -159,6 +159,15 @@ contextBridge.exposeInMainWorld('api', {
   launcherShadersRemove: (id, filename) => invoke('launcher:shadersRemove', id, filename),
   onLauncherShaderProgress: (cb) => on('launcher:shaderProgress', cb),
 
+  // per-world datapacks (Modrinth)
+  launcherWorldsList: (id) => invoke('launcher:worldsList', id),
+  launcherDatapacksList: (id, world) => invoke('launcher:datapacksList', id, world),
+  launcherDatapacksSearch: (id, query, matchVersion) => invoke('launcher:datapacksSearch', id, query, matchVersion),
+  launcherDatapacksAdd: (id, world, projectId, matchVersion) => invoke('launcher:datapacksAdd', id, world, projectId, matchVersion),
+  launcherDatapacksAddLocal: (id, world) => invoke('launcher:datapacksAddLocal', id, world),
+  launcherDatapacksRemove: (id, world, filename) => invoke('launcher:datapacksRemove', id, world, filename),
+  onLauncherDatapackProgress: (cb) => on('launcher:datapackProgress', cb),
+
   // Microsoft account (for launching)
   accountGet: () => invoke('account:get'),
   accountLogin: () => invoke('account:login'),

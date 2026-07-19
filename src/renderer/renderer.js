@@ -358,6 +358,9 @@ function wireGlobalEvents() {
   $('#instAddPacksBtn').addEventListener('click', onInstanceAddPackLocal);
   $('#instBrowseShadersBtn').addEventListener('click', openInstanceShadersBrowser);
   $('#instAddShadersBtn').addEventListener('click', onInstanceAddShaderLocal);
+  $('#instBrowseDatapacksBtn').addEventListener('click', openInstanceDatapacksBrowser);
+  $('#instAddDatapacksBtn').addEventListener('click', onInstanceAddDatapackLocal);
+  $('#instWorldSelect').addEventListener('change', loadInstanceDatapacksList);
 
   // tabs
   $('#tabs').addEventListener('click', (e) => {
@@ -3415,6 +3418,7 @@ function switchInstanceTab(tab) {
   else if (tab === 'mods') loadInstanceMods();
   else if (tab === 'packs') loadInstancePacks();
   else if (tab === 'shaders') loadInstanceShaders();
+  else if (tab === 'datapacks') loadInstanceDatapacks();
   else if (tab === 'settings') loadInstanceSettings();
 }
 
@@ -3838,6 +3842,153 @@ function renderInstanceShaderResults(inst, container, hits, getMatch) {
     const icon = h.icon
       ? el('img', { class: 'mr-icon', src: h.icon, alt: '', loading: 'lazy' })
       : el('div', { class: 'mr-icon mr-icon-ph' }, '✨');
+    container.appendChild(el('div', { class: 'mr-row' },
+      icon,
+      el('div', { class: 'mr-info' },
+        el('div', { class: 'mr-title' }, h.title, el('span', { class: 'mr-author' }, ` by ${h.author}`)),
+        el('div', { class: 'mr-desc' }, h.description || ''),
+        el('div', { class: 'mr-meta' }, `⬇ ${Number(h.downloads).toLocaleString()} downloads`)),
+      addBtn));
+  }
+}
+
+// ---- Instance datapacks (per world — installed into saves/<world>/datapacks) ----
+const currentWorld = () => $('#instWorldSelect').value || '';
+
+async function loadInstanceDatapacks() {
+  const inst = currentInstance();
+  if (!inst) return;
+  const sel = $('#instWorldSelect');
+  const prev = sel.value;
+  let worlds = [];
+  try { worlds = (await call(api.launcherWorldsList(inst.id), { silent: true })).worlds; } catch { worlds = []; }
+  sel.innerHTML = '';
+  const hasWorlds = worlds.length > 0;
+  sel.style.display = hasWorlds ? '' : 'none';
+  $('#instBrowseDatapacksBtn').disabled = !hasWorlds;
+  $('#instAddDatapacksBtn').disabled = !hasWorlds;
+  if (!hasWorlds) {
+    $('#instDatapacksHint').textContent = 'Datapacks apply to a specific world. Launch this instance and create a singleplayer world first, then come back.';
+    const list = $('#instDatapacksList'); list.innerHTML = '';
+    list.appendChild(emptyList('🌍', 'No worlds yet. Play the instance and make a world, then add datapacks to it.'));
+    return;
+  }
+  for (const w of worlds) sel.appendChild(el('option', { value: w }, w));
+  if (worlds.includes(prev)) sel.value = prev;
+  await loadInstanceDatapacksList();
+}
+
+async function loadInstanceDatapacksList() {
+  const inst = currentInstance();
+  if (!inst) return;
+  const world = currentWorld();
+  if (!world) return;
+  const list = $('#instDatapacksList');
+  try {
+    const data = await call(api.launcherDatapacksList(inst.id, world));
+    const n = data.entries.length;
+    $('#instDatapacksHint').textContent = `${n} datapack${n === 1 ? '' : 's'} in “${world}”  ·  run /reload in-game (or rejoin the world) to apply changes`;
+    renderInstanceDatapacksList(inst, world, data.entries);
+  } catch (err) {
+    list.innerHTML = ''; list.appendChild(emptyList('⚠', err.message));
+  }
+}
+
+function renderInstanceDatapacksList(inst, world, entries) {
+  const list = $('#instDatapacksList');
+  list.innerHTML = '';
+  if (!entries.length) {
+    list.appendChild(emptyList('📦', 'No datapacks in this world yet. Click “Browse” to find datapacks on Modrinth, or “Add from disk”.'));
+    return;
+  }
+  for (const item of entries) {
+    const row = el('div', { class: 'content-row' },
+      el('div', { class: 'cr-info' },
+        el('div', { class: 'cr-name' }, item.filename),
+        el('div', { class: 'cr-meta' }, fmtSize(item.size))
+      ),
+      el('button', { class: 'icon-btn', title: 'Remove', onclick: () => removeInstanceDatapack(inst, world, item) }, '🗑')
+    );
+    list.appendChild(row);
+  }
+}
+
+async function removeInstanceDatapack(inst, world, item) {
+  if (!(await confirmModal('Remove datapack?', `Delete "${item.filename}" from the world “${world}”?`, { danger: true, confirmLabel: 'Remove' }))) return;
+  try { await call(api.launcherDatapacksRemove(inst.id, world, item.filename)); await loadInstanceDatapacksList(); } catch { /* shown */ }
+}
+
+async function onInstanceAddDatapackLocal() {
+  const inst = currentInstance();
+  const world = currentWorld();
+  if (!inst || !world) return;
+  try {
+    const added = await call(api.launcherDatapacksAddLocal(inst.id, world));
+    if (added.length) { toast('Added', `${added.length} datapack(s) added to “${world}”.`); await loadInstanceDatapacksList(); }
+  } catch { /* shown */ }
+}
+
+function openInstanceDatapacksBrowser() {
+  const inst = currentInstance();
+  const world = currentWorld();
+  if (!inst || !world) return;
+  const input = el('input', { type: 'text', placeholder: 'Search… (e.g. Terralith, Incendium, Tectonic)' });
+  const matchCb = el('input', { type: 'checkbox', checked: true });
+  const matchLabel = el('span', {}, `Only show datapacks for Minecraft ${inst.mcVersion}`);
+  const matchWrap = el('label', { class: 'mr-vfilter' }, matchCb, matchLabel);
+  const results = el('div', { class: 'mr-results' }, el('div', { class: 'muted', style: 'padding:16px' }, 'Loading…'));
+  const body = el('div', {},
+    el('div', { class: 'mr-search' }, input),
+    el('div', { class: 'cm-filters' }, matchWrap),
+    results,
+    el('div', { class: 'hint', style: 'margin-top:10px' }, 'Datapacks from ',
+      link('Modrinth', 'https://modrinth.com'), ` — installed into the world “`, el('b', {}, world),
+      '”. Run ', el('b', {}, '/reload'), ' in-game (or rejoin the world) to apply them. Note: worldgen datapacks only affect newly-generated chunks.'));
+  modal({ title: `Add datapacks to “${world}”`, body, wide: true, actions: [{ label: 'Done', class: 'ghost-btn' }] });
+
+  let seq = 0;
+  async function doSearch() {
+    const mine = ++seq;
+    results.innerHTML = '';
+    results.appendChild(el('div', { class: 'muted', style: 'padding:16px' }, 'Searching…'));
+    try {
+      const data = await call(api.launcherDatapacksSearch(inst.id, input.value, matchCb.checked), { silent: true });
+      if (mine !== seq) return;
+      renderInstanceDatapackResults(inst, world, results, data.hits, () => matchCb.checked);
+    } catch (err) {
+      if (mine !== seq) return;
+      results.innerHTML = ''; results.appendChild(emptyList('⚠', err.message));
+    }
+  }
+  matchCb.addEventListener('change', doSearch);
+  let t = null;
+  input.addEventListener('input', () => { clearTimeout(t); t = setTimeout(doSearch, 350); });
+  setTimeout(() => input.focus(), 30);
+  doSearch();
+}
+
+function renderInstanceDatapackResults(inst, world, container, hits, getMatch) {
+  container.innerHTML = '';
+  if (!hits.length) { container.appendChild(emptyList('🔍', 'No matches — try a different search.')); return; }
+  for (const h of hits) {
+    const addBtn = el('button', { class: 'primary-btn small' }, 'Add');
+    addBtn.addEventListener('click', async () => {
+      const orig = addBtn.textContent;
+      addBtn.disabled = true; addBtn.textContent = 'Adding…';
+      const unsub = api.onLauncherDatapackProgress((p) => {
+        if (p.projectId === h.projectId && p.total) addBtn.textContent = `${Math.round((p.received / p.total) * 100)}%`;
+      });
+      try {
+        const r = await call(api.launcherDatapacksAdd(inst.id, world, h.projectId, getMatch ? getMatch() : false));
+        unsub();
+        addBtn.textContent = '✓ Added';
+        toast('Installed', `${h.title} (${r.versionNumber}) → “${world}”`);
+        loadInstanceDatapacksList();
+      } catch { unsub(); addBtn.disabled = false; addBtn.textContent = orig; }
+    });
+    const icon = h.icon
+      ? el('img', { class: 'mr-icon', src: h.icon, alt: '', loading: 'lazy' })
+      : el('div', { class: 'mr-icon mr-icon-ph' }, '📦');
     container.appendChild(el('div', { class: 'mr-row' },
       icon,
       el('div', { class: 'mr-info' },

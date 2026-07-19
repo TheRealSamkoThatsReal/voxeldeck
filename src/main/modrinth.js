@@ -173,6 +173,22 @@ async function bestFileShader(projectId, gameVersion = null) {
   return pickBestFile(projectId, ['iris', 'optifine', 'canvas'], gameVersion);
 }
 
+/**
+ * Search Modrinth for *datapacks*. These are per-world (they go in a save's
+ * datapacks/ folder), tagged with the "datapack" loader, and facet on the game
+ * version like resource packs do.
+ */
+async function searchDatapacks({ query = '', gameVersion = null, limit = 24 }) {
+  const facets = [['project_type:datapack']];
+  if (gameVersion) facets.push([`versions:${gameVersion}`]);
+  return { label: 'datapacks', hits: await runSearch(facets, query, limit) };
+}
+
+/** Newest datapack file for a project (Modrinth tags these with the "datapack" loader). */
+async function bestFileDatapack(projectId, gameVersion = null) {
+  return pickBestFile(projectId, ['datapack'], gameVersion);
+}
+
 /** Download a file into destDir, streaming with progress. */
 async function downloadFile(url, filename, destDir, onProgress) {
   await fsp.mkdir(destDir, { recursive: true });
@@ -207,5 +223,6 @@ module.exports = {
   targetFor, detectGameVersion, search, bestFile, downloadFile,
   CLIENT_LOADERS, defaultClientLoader, searchClient, bestFileClient,
   searchResourcePacks, bestFileResourcePack,
-  searchShaders, bestFileShader
+  searchShaders, bestFileShader,
+  searchDatapacks, bestFileDatapack
 };
