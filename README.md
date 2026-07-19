@@ -11,6 +11,17 @@ servers, console, files, auto- and scheduled restarts — is shared.
 
 ## Features
 
+- **Play — Singleplayer launcher with easy modding (Minecraft).** Beyond running
+  *servers*, VoxelDeck can launch the game itself. Open **🎮 Play (Singleplayer)**,
+  sign in with your **Microsoft account** (the same login the official launcher
+  uses — you play with an account that owns the game), then create an **instance**:
+  pick a Minecraft version and a mod loader — **Vanilla**, **Fabric**, or
+  **Quilt**. VoxelDeck downloads the client, libraries, assets and the right
+  **Java runtime automatically**, then launches. Each instance is its own isolated
+  world folder, and for Fabric/Quilt instances you get **one-click modding**:
+  browse Modrinth and install mods straight into that instance, toggle or remove
+  them, or drop in local `.jar`s. Requires a one-time Azure app registration —
+  see [Microsoft login setup](#microsoft-login-setup-for-the-singleplayer-launcher).
 - **Multiple games — Minecraft, Terraria & Valheim.** Pick the game when you add
   a server and VoxelDeck adapts: it installs the right server (downloads the
   Minecraft jar, the Terraria dedicated server, or runs SteamCMD for Valheim),
@@ -105,6 +116,36 @@ servers, console, files, auto- and scheduled restarts — is shared.
   Arch: `yay -S steamcmd`). If it's missing, VoxelDeck tells you how to get it.
 - **Terraria** needs nothing extra — VoxelDeck downloads the official dedicated
   server for you.
+
+## Microsoft login setup (for the singleplayer launcher)
+
+The **🎮 Play (Singleplayer)** launcher signs you in with a real Microsoft
+account, exactly like the official launcher and Prism/MultiMC. Microsoft only
+issues Minecraft-scoped tokens to an **Azure application** that the project owner
+has registered, so this is a **one-time setup** you (the maintainer) do before
+shipping. Until it's done, the launcher shows *"Microsoft login isn't configured
+yet"* and the **Sign in** button is disabled — instance creation and downloads
+still work; only launching needs it.
+
+1. Go to the [Azure Portal](https://portal.azure.com) → **App registrations** →
+   **New registration**.
+   - **Supported account types:** *Personal Microsoft accounts only*.
+   - No redirect URI is needed (we use the OAuth **device-code** flow).
+2. Open the new app → **Authentication** → **Advanced settings** →
+   set **Allow public client flows** = **Yes**.
+3. Request Minecraft API access for the app as described in Mojang's
+   [developer article](https://help.minecraft.net/hc/en-us/articles/16254801392141).
+4. Copy the **Application (client) ID** and provide it to VoxelDeck one of two ways:
+   - set the environment variable `VOXELDECK_MS_CLIENT_ID=<your-client-id>` before
+     launching, **or**
+   - replace the `CLIENT_ID` constant near the top of
+     [`src/main/msauth.js`](src/main/msauth.js).
+
+That's it — the entire device-code → Xbox Live → XSTS → Minecraft token chain,
+token refresh, and per-launch validation are already implemented.
+
+> **Note:** the launcher is for playing with an account that **owns** Minecraft
+> (Java Edition); it is not a way to bypass ownership.
 
 ## Quick start
 
@@ -208,8 +249,14 @@ build downloads extra tooling (NSIS, fpm, etc.) into `~/.cache/electron-builder`
 
 ## Where things are stored
 
-- Server configurations and app settings:
-  `~/.config/voxeldeck/servers.json` (migrated automatically from the old path)
+- Server **and** singleplayer-instance configurations, plus app settings and your
+  signed-in Microsoft account: `~/.config/voxeldeck/servers.json` (migrated
+  automatically from the old path).
+- Singleplayer launcher files: shared client versions/libraries/assets live in
+  `~/.config/voxeldeck/launcher/` (deduped across instances), downloaded Java
+  runtimes in `~/.config/voxeldeck/runtimes/`, and each instance's own world/mods
+  folder under `~/.config/voxeldeck/instances/` (configurable via
+  `settings.instancesRoot`).
 - Your actual server files stay wherever you put them. In a server's **Settings →
   Danger zone** you get two choices: **Remove from dashboard** (the default — takes
   it out of VoxelDeck but leaves every file on disk), or **Delete server & all
@@ -225,11 +272,15 @@ src/
   main/            Electron main process (Node)
     main.js          window + all IPC handlers
     serverManager.js process lifecycle, console I/O, start/stop
-    store.js         JSON persistence of server configs
+    store.js         JSON persistence of server + instance configs & account
     files.js         sandboxed file operations
     serverUtils.js   java detection, server.properties, eula, mods/plugins
     clientMods.js    client-side mod profiles: cache, download & apply to .minecraft
     backups.js       per-server backups: create/list/restore/prune (+ backupWorker.js)
+    launcherManager.js singleplayer instances: install + launch lifecycle
+    mojang.js        vanilla client pipeline (jar, libs, natives, assets, launch args)
+    loaders.js       Fabric & Quilt mod-loader meta (profile JSON)
+    msauth.js        Microsoft device-code auth → Xbox → Minecraft token
   preload/
     preload.js       safe contextBridge API (the only renderer ↔ main surface)
   renderer/
@@ -241,6 +292,7 @@ test/
   lifecycle.test.cjs   start → run → console → stop, using a fake Java
   client-mods.test.cjs client mod cache + apply (isolated sync vs. backup-and-swap)
   backups.test.cjs     backup round-trip: create → restore → prune (real worker)
+  launcher.test.cjs    launcher logic: OS rules, classpath/natives, launch args, loader merge
   clientmods-smoke.cjs dev tool: drives the Client Mods tab/modals in Electron
   backups-smoke.cjs    dev tool: drives the Backups tab (create/restore/delete)
   shoot.cjs            dev tool: screenshots each view via Electron

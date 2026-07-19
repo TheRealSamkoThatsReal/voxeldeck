@@ -33,9 +33,16 @@ const DEFAULT_DATA = {
     minecraftDir: '',
     // Where server backups are stored. Empty = <userData>/backups, resolved at
     // runtime. Kept outside server folders so backups survive deleting a server.
-    backupsRoot: ''
+    backupsRoot: '',
+    // Parent directory for singleplayer launcher instances (each gets its own
+    // game folder with worlds/mods/config). Empty = <userData>/instances.
+    instancesRoot: ''
   },
-  servers: []
+  servers: [],
+  // Singleplayer launcher instances (vanilla / Fabric / Quilt worlds).
+  instances: [],
+  // The signed-in Microsoft account used to launch the game. null = signed out.
+  account: null
 };
 
 function clone(obj) {
@@ -155,10 +162,51 @@ function clampInt(value, min, fallback) {
   return fallback;
 }
 
+/** Normalize a singleplayer launcher instance, filling defaults. */
+const KNOWN_LOADERS = new Set(['vanilla', 'fabric', 'quilt']);
+
+function normalizeInstance(inst) {
+  return {
+    id: inst.id || crypto.randomUUID(),
+    name: inst.name || 'New Instance',
+    // Minecraft version, e.g. '1.21.1'. Empty until the instance is set up.
+    mcVersion: typeof inst.mcVersion === 'string' ? inst.mcVersion : '',
+    loader: KNOWN_LOADERS.has(inst.loader) ? inst.loader : 'vanilla',
+    // Resolved loader (Fabric/Quilt) version. Empty for vanilla.
+    loaderVersion: typeof inst.loaderVersion === 'string' ? inst.loaderVersion : '',
+    // The instance's game folder (--gameDir): worlds, mods/, config/, options.txt.
+    directory: inst.directory || '',
+    // Per-instance Java override. Empty = auto (matched to the version, else global).
+    javaPath: inst.javaPath || '',
+    minRamMb: clampInt(inst.minRamMb, 512, 2048),
+    maxRamMb: clampInt(inst.maxRamMb, 512, 4096),
+    javaArgs: typeof inst.javaArgs === 'string' ? inst.javaArgs : '',
+    createdAt: inst.createdAt || Date.now(),
+    lastPlayed: Number.isFinite(inst.lastPlayed) ? inst.lastPlayed : 0
+  };
+}
+
+/** Normalize the stored Microsoft account (or null when signed out). */
+function normalizeAccount(acc) {
+  if (!acc || typeof acc !== 'object' || !acc.uuid || !acc.name) return null;
+  return {
+    name: String(acc.name),
+    uuid: String(acc.uuid),
+    accessToken: acc.accessToken || '',
+    xuid: acc.xuid || '',
+    userType: acc.userType || 'msa',
+    msRefresh: acc.msRefresh || null,
+    expiresAt: Number.isFinite(acc.expiresAt) ? acc.expiresAt : 0,
+    updatedAt: acc.updatedAt || Date.now()
+  };
+}
+
 module.exports = {
   configPath,
   readData,
   writeData,
   normalizeServer,
+  normalizeInstance,
+  normalizeAccount,
   newId: () => crypto.randomUUID()
 };

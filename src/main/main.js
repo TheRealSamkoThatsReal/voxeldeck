@@ -19,6 +19,10 @@ const scheduler = require('./scheduler');
 const games = require('./games');
 const gameInstaller = require('./gameInstaller');
 const updater = require('./updater');
+const launcherManager = require('./launcherManager');
+const mojang = require('./mojang');
+const loaders = require('./loaders');
+const msauth = require('./msauth');
 
 // Pin the app name so the config folder (app.getPath('userData')) is identical
 // whether the app is run from source (`npm start`) or from a packaged build —
@@ -81,6 +85,9 @@ function wireManagerEvents() {
   serverManager.on('state', forward('server:state'));
   serverManager.on('log', forward('server:log'));
   serverManager.on('stats', forward('server:stats'));
+  launcherManager.on('state', forward('launcher:state'));
+  launcherManager.on('log', forward('launcher:log'));
+  launcherManager.on('progress', forward('launcher:progress'));
 }
 
 // ---- Helpers ---------------------------------------------------------------
@@ -565,6 +572,227 @@ function registerIpc() {
     return filename;
   }));
 
+  // ---- Singleplayer launcher (instances) --------------------------------
+  // Shared "launcher home" for versions/libraries/assets (deduped across
+  // instances); each instance's worlds/mods/config live in its own folder.
+  function launcherHome() { return path.join(app.getPath('userData'), 'launcher'); }
+  function instancesRoot() {
+    const custom = (store.readData().settings.instancesRoot || '').trim();
+    return custom || path.join(app.getPath('userData'), 'instances');
+  }
+  function getInstanceOrThrow(id) {
+    const data = store.readData();
+    const instance = (data.instances || []).find((i) => i.id === id);
+    if (!instance) throw new Error('Instance not found');
+    return { data, instance };
+  }
+  // Resolve the Java binary for a launch: explicit global override, else an
+  // auto-downloaded Temurin JRE matched to what the version needs.
+  async function ensureJavaFor(major, id) {
+    const data = store.readData();
+    if (data.settings.javaPath && data.settings.javaPath.trim()) return data.settings.javaPath.trim();
+    const feature = major <= 8 ? 8 : (major === 16 ? 17 : major); // Adoptium has no GA 16 build
+    const res = await javaManager.ensureRuntime(feature, (p) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('launcher:progress', { id, phase: 'java', ...p });
+    });
+    return res.path;
+  }
+  function instanceModsDir(instance) {
+    if (!instance.directory) throw new Error('This instance has no folder yet.');
+    return path.join(instance.directory, 'mods');
+  }
+  // The Modrinth client-loader key for an instance (vanilla has no mods).
+  function instanceLoader(instance) {
+    if (instance.loader !== 'fabric' && instance.loader !== 'quilt') {
+      throw new Error('This is a vanilla instance — add a Fabric or Quilt instance to install mods.');
+    }
+    return instance.loader;
+  }
+
+  ipcMain.handle('launcher:instances', wrap(async () => {
+    const data = store.readData();
+    return (data.instances || []).map((i) => ({ ...i, state: launcherManager.getState(i.id) }));
+  }));
+
+  ipcMain.handle('launcher:mcVersions', wrap(async () => mojang.listVersions()));
+  ipcMain.handle('launcher:loaderVersions', wrap(async (loader, mcVersion) => loaders.loaderVersions(loader, mcVersion)));
+
+  ipcMain.handle('launcher:createInstance', wrap(async (opts) => {
+    const { name, mcVersion, loader = 'vanilla' } = opts || {};
+    if (!mcVersion) throw new Error('Pick a Minecraft version.');
+    let loaderVersion = '';
+    if (loader === 'fabric' || loader === 'quilt') {
+      loaderVersion = ((opts && opts.loaderVersion) || '').trim() || await loaders.latestLoader(loader, mcVersion);
+    }
+    const { directory } = await files.setupServerFolder(instancesRoot(), name || 'Instance', '', 'mods');
+    const data = store.readData();
+    const instance = store.normalizeInstance({ id: store.newId(), name, mcVersion, loader, loaderVersion, directory });
+    data.instances = data.instances || [];
+    data.instances.push(instance);
+    store.writeData(data);
+    return instance;
+  }));
+
+  ipcMain.handle('launcher:updateInstance', wrap(async (id, patch) => {
+    const data = store.readData();
+    const idx = (data.instances || []).findIndex((i) => i.id === id);
+    if (idx === -1) throw new Error('Instance not found');
+    data.instances[idx] = store.normalizeInstance({ ...data.instances[idx], ...patch, id });
+    store.writeData(data);
+    return data.instances[idx];
+  }));
+
+  ipcMain.handle('launcher:deleteInstance', wrap(async (id, deleteFiles) => {
+    if (launcherManager.isRunning(id)) throw new Error('Close the game before deleting this instance.');
+    const data = store.readData();
+    const instance = (data.instances || []).find((i) => i.id === id);
+    if (deleteFiles && instance && instance.directory) await files.deleteDir(instance.directory);
+    data.instances = (data.instances || []).filter((i) => i.id !== id);
+    store.writeData(data);
+    return true;
+  }));
+
+  ipcMain.handle('launcher:install', wrap(async (id) => {
+    const { instance } = getInstanceOrThrow(id);
+    return launcherManager.install(instance, { home: launcherHome() });
+  }));
+
+  ipcMain.handle('launcher:play', wrap(async (id) => {
+    const { data, instance } = getInstanceOrThrow(id);
+    if (!data.account) throw new Error('Sign in to your Microsoft account first.');
+    // Refresh the token if needed, and persist the refreshed one.
+    const account = await msauth.ensureFresh(store.normalizeAccount(data.account));
+    const d2 = store.readData();
+    d2.account = store.normalizeAccount(account);
+    store.writeData(d2);
+    const result = await launcherManager.play(instance, account, {
+      home: launcherHome(),
+      launcherVersion: app.getVersion(),
+      ensureJava: (major) => ensureJavaFor(major, id)
+    });
+    // Stamp last-played.
+    const d3 = store.readData();
+    const idx = (d3.instances || []).findIndex((i) => i.id === id);
+    if (idx !== -1) { d3.instances[idx] = store.normalizeInstance({ ...d3.instances[idx], lastPlayed: Date.now() }); store.writeData(d3); }
+    return result;
+  }));
+
+  ipcMain.handle('launcher:stop', wrap(async (id, opts) => launcherManager.stop(id, opts || {})));
+  ipcMain.handle('launcher:state', wrap(async (id) => ({ state: launcherManager.getState(id) })));
+  ipcMain.handle('launcher:logBuffer', wrap(async (id) => launcherManager.getLogBuffer(id)));
+  ipcMain.handle('launcher:openFolder', wrap(async (id) => {
+    const { instance } = getInstanceOrThrow(id);
+    if (!instance.directory) throw new Error('This instance has no folder yet.');
+    fs.mkdirSync(instance.directory, { recursive: true });
+    await shell.openPath(instance.directory);
+    return instance.directory;
+  }));
+
+  // ---- Per-instance mods (Modrinth, into <instance>/mods) ----
+  ipcMain.handle('launcher:modsList', wrap(async (id) => {
+    const { instance } = getInstanceOrThrow(id);
+    const dir = instanceModsDir(instance);
+    let names = [];
+    try { names = (await fs.promises.readdir(dir)).filter((n) => /\.jar(\.disabled)?$/i.test(n)); } catch { /* no folder yet */ }
+    const entries = [];
+    for (const name of names.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))) {
+      let size = 0;
+      try { size = (await fs.promises.stat(path.join(dir, name))).size; } catch { /* ignore */ }
+      entries.push({ filename: name.replace(/\.disabled$/i, ''), enabled: !/\.disabled$/i.test(name), size });
+    }
+    return { entries, dir, loader: instance.loader };
+  }));
+
+  ipcMain.handle('launcher:modsSearch', wrap(async (id, query, matchVersion) => {
+    const { instance } = getInstanceOrThrow(id);
+    const loader = instanceLoader(instance);
+    const data = await modrinth.searchClient({ query, loader, gameVersion: matchVersion ? instance.mcVersion : null });
+    return { ...data, gameVersion: instance.mcVersion };
+  }));
+
+  ipcMain.handle('launcher:modsAdd', wrap(async (id, projectId, matchVersion) => {
+    const { instance } = getInstanceOrThrow(id);
+    const loader = instanceLoader(instance);
+    const file = await modrinth.bestFileClient(projectId, loader, matchVersion ? instance.mcVersion : null);
+    const filename = await modrinth.downloadFile(file.url, file.filename, instanceModsDir(instance), (p) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('launcher:modProgress', { id, projectId, ...p });
+    });
+    return { filename, versionNumber: file.versionNumber, gameVersions: file.gameVersions };
+  }));
+
+  ipcMain.handle('launcher:modsAddLocal', wrap(async (id) => {
+    const { instance } = getInstanceOrThrow(id);
+    const dir = instanceModsDir(instance);
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Add mods (.jar)',
+      filters: [{ name: 'Java Archive', extensions: ['jar'] }],
+      properties: ['openFile', 'multiSelections']
+    });
+    if (result.canceled) return [];
+    await fs.promises.mkdir(dir, { recursive: true });
+    const added = [];
+    for (const src of result.filePaths) {
+      const base = path.basename(src);
+      await fs.promises.copyFile(src, path.join(dir, base));
+      added.push(base);
+    }
+    return added;
+  }));
+
+  ipcMain.handle('launcher:modsToggle', wrap(async (id, filename, enable) => {
+    const { instance } = getInstanceOrThrow(id);
+    const dir = instanceModsDir(instance);
+    const base = path.basename(filename).replace(/\.disabled$/i, '');
+    const on = path.join(dir, base);
+    const off = path.join(dir, base + '.disabled');
+    if (enable) { if (fs.existsSync(off)) await fs.promises.rename(off, on); }
+    else { if (fs.existsSync(on)) await fs.promises.rename(on, off); }
+    return true;
+  }));
+
+  ipcMain.handle('launcher:modsRemove', wrap(async (id, filename) => {
+    const { instance } = getInstanceOrThrow(id);
+    const dir = instanceModsDir(instance);
+    const base = path.basename(filename);
+    for (const cand of [base, base + '.disabled']) {
+      const p = path.join(dir, cand);
+      if (fs.existsSync(p)) await fs.promises.rm(p, { force: true });
+    }
+    return true;
+  }));
+
+  // ---- Microsoft account ----
+  let loginAbort = false;
+  function sanitizeAccount(acc) {
+    if (!acc) return null;
+    return { name: acc.name, uuid: acc.uuid, updatedAt: acc.updatedAt, expiresAt: acc.expiresAt };
+  }
+
+  ipcMain.handle('account:get', wrap(async () => ({
+    account: sanitizeAccount(store.readData().account),
+    configured: msauth.isConfigured()
+  })));
+
+  ipcMain.handle('account:login', wrap(async () => {
+    loginAbort = false;
+    const account = await msauth.startDeviceLogin((info) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('account:code', info);
+    }, () => loginAbort);
+    const data = store.readData();
+    data.account = store.normalizeAccount(account);
+    store.writeData(data);
+    return sanitizeAccount(data.account);
+  }));
+
+  ipcMain.handle('account:cancelLogin', wrap(async () => { loginAbort = true; return true; }));
+
+  ipcMain.handle('account:logout', wrap(async () => {
+    const data = store.readData();
+    data.account = null;
+    store.writeData(data);
+    return true;
+  }));
+
   // ---- Native pickers ----
   ipcMain.handle('dialog:pickDirectory', wrap(async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
@@ -603,14 +831,16 @@ app.whenReady().then(() => {
 
 let quitting = false;
 app.on('before-quit', async (e) => {
-  const running = store.readData().servers.some((s) => serverManager.isRunning(s.id));
+  const data = store.readData();
+  const running = data.servers.some((s) => serverManager.isRunning(s.id))
+    || (data.instances || []).some((i) => launcherManager.isRunning(i.id));
   if (running && !quitting) {
     e.preventDefault();
     quitting = true;
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('app:quitting');
     }
-    await serverManager.stopAll();
+    await Promise.all([serverManager.stopAll(), launcherManager.stopAll()]);
     app.quit();
   }
 });

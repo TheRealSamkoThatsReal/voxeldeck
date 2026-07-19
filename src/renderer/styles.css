@@ -142,6 +142,10 @@ button, input, textarea, select { font-family: inherit; color: inherit; }
 }
 .primary-btn:hover { background: var(--accent-hover); }
 .primary-btn:active { transform: translateY(1px); }
+/* Press feedback — reuse the app's existing translateY(1px) dip so every button
+   (not just primary/cards) confirms the click. Near-imperceptible; guarded so
+   disabled controls don't dip. */
+.icon-btn:active, .ghost-btn:active, .danger-btn:active { transform: translateY(1px); }
 .primary-btn:disabled { background: #2a3a2d; color: #5e7062; cursor: not-allowed; }
 .primary-btn.small { padding: 6px 12px; font-size: 12px; }
 .danger-btn {
@@ -536,12 +540,19 @@ input[type=range]::-webkit-slider-thumb {
 .modal-host {
   position: fixed; inset: 0; background: rgba(0,0,0,.6); backdrop-filter: blur(3px);
   display: grid; place-items: center; z-index: 100;
+  /* Backdrop fades in; replays on each open because .hidden toggles display. */
+  animation: modalHostIn .15s ease;
 }
 .modal {
   background: var(--bg-elev); border: 1px solid var(--border); border-radius: 14px;
   box-shadow: var(--shadow); width: 520px; max-width: calc(100vw - 48px);
   max-height: calc(100vh - 64px); overflow: auto; padding: 24px;
+  /* Card settles in from a hair smaller (never scale(0)); stays centered. */
+  animation: modalIn .2s ease;
 }
+/* Fade + gentle scale, transform/opacity only — no layout properties. */
+@keyframes modalHostIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modalIn { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; } }
 .modal.wide { width: 760px; }
 .modal h2 { font-size: 18px; margin-bottom: 4px; }
 
@@ -680,3 +691,43 @@ a { color: var(--blue); cursor: pointer; }
 }
 .tour-skip:hover { color: var(--text-dim); }
 .ghost-btn.small { width: auto; padding: 7px 13px; font-size: 12.5px; }
+
+/* ---- Singleplayer launcher --------------------------------------------- */
+.account-bar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; margin-bottom: 16px;
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius);
+  flex-wrap: wrap;
+}
+.account-avatar {
+  width: 34px; height: 34px; border-radius: 7px;
+  background: var(--bg-elev-2); display: grid; place-items: center; font-size: 16px; flex-shrink: 0;
+}
+.account-bar .ab-info { flex: 1; min-width: 160px; }
+.account-bar .ab-name { font-weight: 600; }
+.account-bar .ab-sub { font-size: 12px; color: var(--text-faint); margin-top: 2px; }
+
+.inst-progress { margin: 14px 22px 0; }
+.inst-progress .ip-label { font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+.inst-progress .ip-track { height: 8px; border-radius: 5px; background: var(--bg-elev-2); overflow: hidden; }
+.inst-progress .ip-fill { height: 100%; width: 0; background: var(--accent); transition: width .2s ease; }
+
+.device-code {
+  font-family: var(--mono); font-size: 26px; letter-spacing: 5px; font-weight: 700;
+  text-align: center; padding: 14px; margin: 12px 0; color: var(--accent);
+  background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: var(--radius);
+  /* Delight-tier (first-time sign-in only): a gentle, slightly-delayed settle
+     that draws the eye to the code the user must copy. transform/opacity only. */
+  animation: codePop .28s ease .05s both;
+}
+@keyframes codePop { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
+
+/* ---- Reduced motion ---------------------------------------------------------
+   The app had no prefers-reduced-motion handling. Soften (don't kill) motion:
+   entrances fade without scale/slide, and the looping status-dot pulse stops. */
+@media (prefers-reduced-motion: reduce) {
+  .modal { animation: modalHostIn .15s ease; }        /* fade only, no scale */
+  .device-code { animation: modalHostIn .2s ease both; }
+  .toast, .update-banner { animation: modalHostIn .2s ease; } /* fade, no slide-in */
+  .status-dot.starting, .status-dot.stopping { animation: none; }
+}

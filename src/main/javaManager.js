@@ -142,4 +142,15 @@ async function findJava(dir, feature) {
   return null;
 }
 
-module.exports = { platformInfo, latestInfo, downloadVersion, binaryUrl };
+/**
+ * Return a path to a `java` binary for the given feature version, reusing a
+ * previously-downloaded runtime when one exists and only downloading if not.
+ * Used by the singleplayer launcher so each Play doesn't re-fetch the JRE.
+ */
+async function ensureRuntime(feature, onProgress) {
+  const existing = await findJava(runtimesDir(), feature);
+  if (existing) return { path: existing, feature };
+  return downloadVersion(feature, onProgress);
+}
+
+module.exports = { platformInfo, latestInfo, downloadVersion, binaryUrl, ensureRuntime };

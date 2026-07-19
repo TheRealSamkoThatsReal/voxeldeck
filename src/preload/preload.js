@@ -117,6 +117,39 @@ contextBridge.exposeInMainWorld('api', {
   downloadJar: (id, version) => invoke('jar:download', id, version),
   onJarProgress: (cb) => on('jar:progress', cb),
 
+  // singleplayer launcher (instances)
+  launcherInstances: () => invoke('launcher:instances'),
+  launcherMcVersions: () => invoke('launcher:mcVersions'),
+  launcherLoaderVersions: (loader, mcVersion) => invoke('launcher:loaderVersions', loader, mcVersion),
+  launcherCreate: (opts) => invoke('launcher:createInstance', opts),
+  launcherUpdate: (id, patch) => invoke('launcher:updateInstance', id, patch),
+  launcherDelete: (id, deleteFiles) => invoke('launcher:deleteInstance', id, deleteFiles),
+  launcherInstall: (id) => invoke('launcher:install', id),
+  launcherPlay: (id) => invoke('launcher:play', id),
+  launcherStop: (id, opts) => invoke('launcher:stop', id, opts),
+  launcherGetState: (id) => invoke('launcher:state', id),
+  launcherLogBuffer: (id) => invoke('launcher:logBuffer', id),
+  launcherOpenFolder: (id) => invoke('launcher:openFolder', id),
+  onLauncherState: (cb) => on('launcher:state', cb),
+  onLauncherLog: (cb) => on('launcher:log', cb),
+  onLauncherProgress: (cb) => on('launcher:progress', cb),
+
+  // per-instance mods (Modrinth)
+  launcherModsList: (id) => invoke('launcher:modsList', id),
+  launcherModsSearch: (id, query, matchVersion) => invoke('launcher:modsSearch', id, query, matchVersion),
+  launcherModsAdd: (id, projectId, matchVersion) => invoke('launcher:modsAdd', id, projectId, matchVersion),
+  launcherModsAddLocal: (id) => invoke('launcher:modsAddLocal', id),
+  launcherModsToggle: (id, filename, enable) => invoke('launcher:modsToggle', id, filename, enable),
+  launcherModsRemove: (id, filename) => invoke('launcher:modsRemove', id, filename),
+  onLauncherModProgress: (cb) => on('launcher:modProgress', cb),
+
+  // Microsoft account (for launching)
+  accountGet: () => invoke('account:get'),
+  accountLogin: () => invoke('account:login'),
+  accountCancelLogin: () => invoke('account:cancelLogin'),
+  accountLogout: () => invoke('account:logout'),
+  onAccountCode: (cb) => on('account:code', cb),
+
   // native pickers
   pickDirectory: () => invoke('dialog:pickDirectory'),
   pickJar: (startDir) => invoke('dialog:pickJar', startDir),
