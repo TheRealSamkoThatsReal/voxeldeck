@@ -824,6 +824,69 @@ function registerIpc() {
     return true;
   }));
 
+  // ---- Per-instance shader packs (Modrinth, into <instance>/shaderpacks) ----
+  // Shaders need a shader loader to render — on Fabric/Quilt that's the Iris mod
+  // (install it from the Mods tab). The .zip itself is loader-agnostic.
+  function instanceShadersDir(instance) {
+    if (!instance.directory) throw new Error('This instance has no folder yet.');
+    return path.join(instance.directory, 'shaderpacks');
+  }
+
+  ipcMain.handle('launcher:shadersList', wrap(async (id) => {
+    const { instance } = getInstanceOrThrow(id);
+    const dir = instanceShadersDir(instance);
+    let names = [];
+    try { names = (await fs.promises.readdir(dir)).filter((n) => /\.zip$/i.test(n)); } catch { /* no folder yet */ }
+    const entries = [];
+    for (const name of names.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))) {
+      let size = 0;
+      try { size = (await fs.promises.stat(path.join(dir, name))).size; } catch { /* ignore */ }
+      entries.push({ filename: name, size });
+    }
+    return { entries, dir };
+  }));
+
+  ipcMain.handle('launcher:shadersSearch', wrap(async (id, query, matchVersion) => {
+    const { instance } = getInstanceOrThrow(id);
+    const data = await modrinth.searchShaders({ query, gameVersion: matchVersion ? instance.mcVersion : null });
+    return { ...data, gameVersion: instance.mcVersion };
+  }));
+
+  ipcMain.handle('launcher:shadersAdd', wrap(async (id, projectId, matchVersion) => {
+    const { instance } = getInstanceOrThrow(id);
+    const file = await modrinth.bestFileShader(projectId, matchVersion ? instance.mcVersion : null);
+    const filename = await modrinth.downloadFile(file.url, file.filename, instanceShadersDir(instance), (p) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('launcher:shaderProgress', { id, projectId, ...p });
+    });
+    return { filename, versionNumber: file.versionNumber, gameVersions: file.gameVersions };
+  }));
+
+  ipcMain.handle('launcher:shadersAddLocal', wrap(async (id) => {
+    const { instance } = getInstanceOrThrow(id);
+    const dir = instanceShadersDir(instance);
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Add shader packs (.zip)',
+      filters: [{ name: 'Shader pack', extensions: ['zip'] }],
+      properties: ['openFile', 'multiSelections']
+    });
+    if (result.canceled) return [];
+    await fs.promises.mkdir(dir, { recursive: true });
+    const added = [];
+    for (const src of result.filePaths) {
+      const base = path.basename(src);
+      await fs.promises.copyFile(src, path.join(dir, base));
+      added.push(base);
+    }
+    return added;
+  }));
+
+  ipcMain.handle('launcher:shadersRemove', wrap(async (id, filename) => {
+    const { instance } = getInstanceOrThrow(id);
+    const p = path.join(instanceShadersDir(instance), path.basename(filename));
+    if (fs.existsSync(p)) await fs.promises.rm(p, { force: true });
+    return true;
+  }));
+
   // ---- Microsoft account ----
   let loginAbort = false;
   function sanitizeAccount(acc) {

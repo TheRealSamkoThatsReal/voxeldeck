@@ -157,6 +157,22 @@ async function bestFileResourcePack(projectId, gameVersion = null) {
   return pickBestFile(projectId, ['minecraft'], gameVersion);
 }
 
+/**
+ * Search Modrinth for *shader packs*. Like resource packs these facet on
+ * project_type + optionally the game version; the shader itself is loader-agnostic
+ * (the same .zip runs under Iris or OptiFine).
+ */
+async function searchShaders({ query = '', gameVersion = null, limit = 24 }) {
+  const facets = [['project_type:shader']];
+  if (gameVersion) facets.push([`versions:${gameVersion}`]);
+  return { label: 'shaders', hits: await runSearch(facets, query, limit) };
+}
+
+/** Newest shader-pack file for a project (shader loaders: iris / optifine / canvas). */
+async function bestFileShader(projectId, gameVersion = null) {
+  return pickBestFile(projectId, ['iris', 'optifine', 'canvas'], gameVersion);
+}
+
 /** Download a file into destDir, streaming with progress. */
 async function downloadFile(url, filename, destDir, onProgress) {
   await fsp.mkdir(destDir, { recursive: true });
@@ -190,5 +206,6 @@ async function downloadFile(url, filename, destDir, onProgress) {
 module.exports = {
   targetFor, detectGameVersion, search, bestFile, downloadFile,
   CLIENT_LOADERS, defaultClientLoader, searchClient, bestFileClient,
-  searchResourcePacks, bestFileResourcePack
+  searchResourcePacks, bestFileResourcePack,
+  searchShaders, bestFileShader
 };

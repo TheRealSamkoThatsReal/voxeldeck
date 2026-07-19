@@ -86,6 +86,7 @@
           <button class="tab active" data-itab="console">Console</button>
           <button class="tab" data-itab="mods" id="instModsTab">Mods</button>
           <button class="tab" data-itab="packs">Resource Packs</button>
+          <button class="tab" data-itab="shaders" id="instShadersTab">Shaders</button>
           <button class="tab" data-itab="settings">Settings</button>
         </nav>
 
@@ -124,6 +125,21 @@
               </div>
             </div>
             <ul id="instPacksList" class="content-list"></ul>
+          </div>
+
+          <!-- Shaders -->
+          <div class="tab-pane" data-ipane="shaders">
+            <div class="content-head">
+              <div>
+                <h2>Shaders</h2>
+                <p class="muted" id="instShadersHint"></p>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button class="primary-btn" id="instBrowseShadersBtn">🔎 Browse</button>
+                <button class="ghost-btn" id="instAddShadersBtn" style="width:auto">＋ Add from disk</button>
+              </div>
+            </div>
+            <ul id="instShadersList" class="content-list"></ul>
           </div>
 
           <!-- Settings -->

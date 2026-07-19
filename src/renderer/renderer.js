@@ -356,6 +356,8 @@ function wireGlobalEvents() {
   $('#instAddModsBtn').addEventListener('click', onInstanceAddModLocal);
   $('#instBrowsePacksBtn').addEventListener('click', openInstancePacksBrowser);
   $('#instAddPacksBtn').addEventListener('click', onInstanceAddPackLocal);
+  $('#instBrowseShadersBtn').addEventListener('click', openInstanceShadersBrowser);
+  $('#instAddShadersBtn').addEventListener('click', onInstanceAddShaderLocal);
 
   // tabs
   $('#tabs').addEventListener('click', (e) => {
@@ -3379,8 +3381,10 @@ function renderInstanceDetail() {
   $('#instName').textContent = inst.name;
   $('#instVersion').textContent = loaderLabel(inst);
   $('#instRam').textContent = `🧠 ${inst.maxRamMb} MB`;
-  // Vanilla instances have no mods tab.
-  $('#instModsTab').style.display = (inst.loader === 'fabric' || inst.loader === 'quilt') ? '' : 'none';
+  // Vanilla instances have no mods tab, and shaders need a mod loader (Iris).
+  const modded = inst.loader === 'fabric' || inst.loader === 'quilt';
+  $('#instModsTab').style.display = modded ? '' : 'none';
+  $('#instShadersTab').style.display = modded ? '' : 'none';
   updateInstancePowerUI();
 }
 
@@ -3410,6 +3414,7 @@ function switchInstanceTab(tab) {
   if (tab === 'console') loadInstanceConsole();
   else if (tab === 'mods') loadInstanceMods();
   else if (tab === 'packs') loadInstancePacks();
+  else if (tab === 'shaders') loadInstanceShaders();
   else if (tab === 'settings') loadInstanceSettings();
 }
 
@@ -3715,6 +3720,124 @@ function renderInstancePackResults(inst, container, hits, getMatch) {
     const icon = h.icon
       ? el('img', { class: 'mr-icon', src: h.icon, alt: '', loading: 'lazy' })
       : el('div', { class: 'mr-icon mr-icon-ph' }, '🎨');
+    container.appendChild(el('div', { class: 'mr-row' },
+      icon,
+      el('div', { class: 'mr-info' },
+        el('div', { class: 'mr-title' }, h.title, el('span', { class: 'mr-author' }, ` by ${h.author}`)),
+        el('div', { class: 'mr-desc' }, h.description || ''),
+        el('div', { class: 'mr-meta' }, `⬇ ${Number(h.downloads).toLocaleString()} downloads`)),
+      addBtn));
+  }
+}
+
+// ---- Instance shaders (Fabric/Quilt only; rendered through the Iris mod) ----
+async function loadInstanceShaders() {
+  const inst = currentInstance();
+  if (!inst) return;
+  const list = $('#instShadersList');
+  try {
+    const data = await call(api.launcherShadersList(inst.id));
+    const n = data.entries.length;
+    $('#instShadersHint').textContent = `${n} shader${n === 1 ? '' : 's'} installed  ·  needs the Iris mod (add it in the Mods tab), then enable in-game under Options → Video → Shaders`;
+    renderInstanceShadersList(inst, data.entries);
+  } catch (err) {
+    list.innerHTML = ''; list.appendChild(emptyList('⚠', err.message));
+  }
+}
+
+function renderInstanceShadersList(inst, entries) {
+  const list = $('#instShadersList');
+  list.innerHTML = '';
+  if (!entries.length) {
+    list.appendChild(emptyList('✨', 'No shaders yet. Install the Iris mod (Mods tab), then “Browse” for shaders or “Add from disk”.'));
+    return;
+  }
+  for (const item of entries) {
+    const row = el('div', { class: 'content-row' },
+      el('div', { class: 'cr-info' },
+        el('div', { class: 'cr-name' }, item.filename),
+        el('div', { class: 'cr-meta' }, fmtSize(item.size))
+      ),
+      el('button', { class: 'icon-btn', title: 'Remove', onclick: () => removeInstanceShader(inst, item) }, '🗑')
+    );
+    list.appendChild(row);
+  }
+}
+
+async function removeInstanceShader(inst, item) {
+  if (!(await confirmModal('Remove shader?', `Delete "${item.filename}" from this instance?`, { danger: true, confirmLabel: 'Remove' }))) return;
+  try { await call(api.launcherShadersRemove(inst.id, item.filename)); await loadInstanceShaders(); } catch { /* shown */ }
+}
+
+async function onInstanceAddShaderLocal() {
+  const inst = currentInstance();
+  if (!inst) return;
+  try {
+    const added = await call(api.launcherShadersAddLocal(inst.id));
+    if (added.length) { toast('Added', `${added.length} shader(s) added.`); await loadInstanceShaders(); }
+  } catch { /* shown */ }
+}
+
+function openInstanceShadersBrowser() {
+  const inst = currentInstance();
+  if (!inst) return;
+  const input = el('input', { type: 'text', placeholder: 'Search… (e.g. Complementary, BSL, Sildur’s)' });
+  const matchCb = el('input', { type: 'checkbox', checked: true });
+  const matchLabel = el('span', {}, `Only show shaders for Minecraft ${inst.mcVersion}`);
+  const matchWrap = el('label', { class: 'mr-vfilter' }, matchCb, matchLabel);
+  const results = el('div', { class: 'mr-results' }, el('div', { class: 'muted', style: 'padding:16px' }, 'Loading…'));
+  const body = el('div', {},
+    el('div', { class: 'mr-search' }, input),
+    el('div', { class: 'cm-filters' }, matchWrap),
+    results,
+    el('div', { class: 'hint', style: 'margin-top:10px' }, 'Shaders from ',
+      link('Modrinth', 'https://modrinth.com'), '. They run through the ', el('b', {}, 'Iris'),
+      ' mod — install Iris (and Sodium) from the Mods tab, then enable a shader in-game under Options → Video → Shaders.'));
+  modal({ title: 'Add shaders', body, wide: true, actions: [{ label: 'Done', class: 'ghost-btn' }] });
+
+  let seq = 0;
+  async function doSearch() {
+    const mine = ++seq;
+    results.innerHTML = '';
+    results.appendChild(el('div', { class: 'muted', style: 'padding:16px' }, 'Searching…'));
+    try {
+      const data = await call(api.launcherShadersSearch(inst.id, input.value, matchCb.checked), { silent: true });
+      if (mine !== seq) return;
+      renderInstanceShaderResults(inst, results, data.hits, () => matchCb.checked);
+    } catch (err) {
+      if (mine !== seq) return;
+      results.innerHTML = ''; results.appendChild(emptyList('⚠', err.message));
+    }
+  }
+  matchCb.addEventListener('change', doSearch);
+  let t = null;
+  input.addEventListener('input', () => { clearTimeout(t); t = setTimeout(doSearch, 350); });
+  setTimeout(() => input.focus(), 30);
+  doSearch();
+}
+
+function renderInstanceShaderResults(inst, container, hits, getMatch) {
+  container.innerHTML = '';
+  if (!hits.length) { container.appendChild(emptyList('🔍', 'No matches — try a different search.')); return; }
+  for (const h of hits) {
+    const addBtn = el('button', { class: 'primary-btn small' }, 'Add');
+    addBtn.addEventListener('click', async () => {
+      const orig = addBtn.textContent;
+      addBtn.disabled = true; addBtn.textContent = 'Adding…';
+      const unsub = api.onLauncherShaderProgress((p) => {
+        if (p.projectId === h.projectId && p.total) addBtn.textContent = `${Math.round((p.received / p.total) * 100)}%`;
+      });
+      try {
+        const r = await call(api.launcherShadersAdd(inst.id, h.projectId, getMatch ? getMatch() : false));
+        unsub();
+        addBtn.textContent = '✓ Added';
+        toast('Installed', `${h.title} (${r.versionNumber})`);
+        loadInstanceShaders();
+      } catch { unsub(); addBtn.disabled = false; addBtn.textContent = orig; }
+    });
+    const icon = h.icon
+      ? el('img', { class: 'mr-icon', src: h.icon, alt: '', loading: 'lazy' })
+      : el('div', { class: 'mr-icon mr-icon-ph' }, '✨');
     container.appendChild(el('div', { class: 'mr-row' },
       icon,
       el('div', { class: 'mr-info' },
