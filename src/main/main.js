@@ -665,6 +665,8 @@ function registerIpc() {
     const d2 = store.readData();
     d2.account = store.normalizeAccount(account);
     store.writeData(d2);
+    // Copy the instance's global datapacks into every world before launching.
+    try { await syncGlobalDatapacks(instance); } catch { /* non-fatal */ }
     const result = await launcherManager.play(instance, account, {
       home: launcherHome(),
       launcherVersion: app.getVersion(),
@@ -890,13 +892,44 @@ function registerIpc() {
   // ---- Per-world datapacks (Modrinth, into saves/<world>/datapacks) ----
   // Datapacks are scoped to a single world, not the whole instance, so every op
   // takes a world name. They apply after a /reload in-game (or rejoining).
+  const GLOBAL_DP = '__global__';
   function instanceWorldDatapacksDir(instance, world) {
     if (!instance.directory) throw new Error('This instance has no folder yet.');
+    // The instance-wide "global" datapacks VoxelDeck copies into every world on
+    // launch. Kept outside saves/ so Minecraft never reads it as a world pack.
+    if (world === GLOBAL_DP) return path.join(instance.directory, 'datapacks-global');
     const safe = path.basename(String(world || ''));
     if (!safe || safe === '.' || safe === '..') throw new Error('Pick a world first.');
     const dir = path.join(instance.directory, 'saves', safe);
     if (!fs.existsSync(dir)) throw new Error('That world no longer exists.');
     return path.join(dir, 'datapacks');
+  }
+
+  // Copy every global datapack into each existing world's datapacks/ folder
+  // (skipping ones already present). Runs on Play. Note: this makes global packs
+  // apply to worlds, but a *worldgen* pack still only affects newly-generated
+  // chunks — a brand-new world must add it on the in-game Create-World screen.
+  async function syncGlobalDatapacks(instance) {
+    if (!instance.directory) return;
+    const gdir = path.join(instance.directory, 'datapacks-global');
+    let packs = [];
+    try { packs = (await fs.promises.readdir(gdir)).filter((n) => /\.zip$/i.test(n)); } catch { return; }
+    if (!packs.length) return;
+    const savesDir = path.join(instance.directory, 'saves');
+    let worlds = [];
+    try {
+      worlds = (await fs.promises.readdir(savesDir, { withFileTypes: true }))
+        .filter((e) => e.isDirectory() && fs.existsSync(path.join(savesDir, e.name, 'level.dat')))
+        .map((e) => e.name);
+    } catch { return; }
+    for (const w of worlds) {
+      const dpDir = path.join(savesDir, w, 'datapacks');
+      await fs.promises.mkdir(dpDir, { recursive: true });
+      for (const p of packs) {
+        const dest = path.join(dpDir, p);
+        if (!fs.existsSync(dest)) { try { await fs.promises.copyFile(path.join(gdir, p), dest); } catch { /* skip */ } }
+      }
+    }
   }
 
   ipcMain.handle('launcher:worldsList', wrap(async (id) => {
@@ -969,6 +1002,16 @@ function registerIpc() {
     const p = path.join(instanceWorldDatapacksDir(instance, world), path.basename(filename));
     if (fs.existsSync(p)) await fs.promises.rm(p, { force: true });
     return true;
+  }));
+
+  // Open the target datapacks folder in the file manager (so a worldgen .zip can
+  // be dragged onto Minecraft's Create-World → Data Packs screen).
+  ipcMain.handle('launcher:datapacksReveal', wrap(async (id, world) => {
+    const { instance } = getInstanceOrThrow(id);
+    const dir = instanceWorldDatapacksDir(instance, world);
+    fs.mkdirSync(dir, { recursive: true });
+    await shell.openPath(dir);
+    return dir;
   }));
 
   // ---- Microsoft account ----

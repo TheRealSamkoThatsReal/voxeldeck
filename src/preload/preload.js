@@ -166,6 +166,7 @@ contextBridge.exposeInMainWorld('api', {
   launcherDatapacksAdd: (id, world, projectId, matchVersion) => invoke('launcher:datapacksAdd', id, world, projectId, matchVersion),
   launcherDatapacksAddLocal: (id, world) => invoke('launcher:datapacksAddLocal', id, world),
   launcherDatapacksRemove: (id, world, filename) => invoke('launcher:datapacksRemove', id, world, filename),
+  launcherDatapacksReveal: (id, world) => invoke('launcher:datapacksReveal', id, world),
   onLauncherDatapackProgress: (cb) => on('launcher:datapackProgress', cb),
 
   // Microsoft account (for launching)

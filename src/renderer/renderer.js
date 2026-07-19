@@ -360,6 +360,10 @@ function wireGlobalEvents() {
   $('#instAddShadersBtn').addEventListener('click', onInstanceAddShaderLocal);
   $('#instBrowseDatapacksBtn').addEventListener('click', openInstanceDatapacksBrowser);
   $('#instAddDatapacksBtn').addEventListener('click', onInstanceAddDatapackLocal);
+  $('#instRevealDatapacksBtn').addEventListener('click', () => {
+    const inst = currentInstance(); const world = currentWorld();
+    if (inst && world) call(api.launcherDatapacksReveal(inst.id, world), { silent: true });
+  });
   $('#instWorldSelect').addEventListener('change', loadInstanceDatapacksList);
 
   // tabs
@@ -3852,7 +3856,8 @@ function renderInstanceShaderResults(inst, container, hits, getMatch) {
   }
 }
 
-// ---- Instance datapacks (per world — installed into saves/<world>/datapacks) ----
+// ---- Instance datapacks (per world, plus a Global area copied into every world) ----
+const GLOBAL_DP = '__global__';
 const currentWorld = () => $('#instWorldSelect').value || '';
 
 async function loadInstanceDatapacks() {
@@ -3863,18 +3868,13 @@ async function loadInstanceDatapacks() {
   let worlds = [];
   try { worlds = (await call(api.launcherWorldsList(inst.id), { silent: true })).worlds; } catch { worlds = []; }
   sel.innerHTML = '';
-  const hasWorlds = worlds.length > 0;
-  sel.style.display = hasWorlds ? '' : 'none';
-  $('#instBrowseDatapacksBtn').disabled = !hasWorlds;
-  $('#instAddDatapacksBtn').disabled = !hasWorlds;
-  if (!hasWorlds) {
-    $('#instDatapacksHint').textContent = 'Datapacks apply to a specific world. Launch this instance and create a singleplayer world first, then come back.';
-    const list = $('#instDatapacksList'); list.innerHTML = '';
-    list.appendChild(emptyList('🌍', 'No worlds yet. Play the instance and make a world, then add datapacks to it.'));
-    return;
-  }
+  // Global always available; worlds appear once they exist.
+  sel.appendChild(el('option', { value: GLOBAL_DP }, '🌍 Global (all worlds)'));
   for (const w of worlds) sel.appendChild(el('option', { value: w }, w));
-  if (worlds.includes(prev)) sel.value = prev;
+  sel.value = (prev && (prev === GLOBAL_DP || worlds.includes(prev))) ? prev : GLOBAL_DP;
+  // Browse/add always work — Global doesn't need a world.
+  $('#instBrowseDatapacksBtn').disabled = false;
+  $('#instAddDatapacksBtn').disabled = false;
   await loadInstanceDatapacksList();
 }
 
@@ -3887,7 +3887,9 @@ async function loadInstanceDatapacksList() {
   try {
     const data = await call(api.launcherDatapacksList(inst.id, world));
     const n = data.entries.length;
-    $('#instDatapacksHint').textContent = `${n} datapack${n === 1 ? '' : 's'} in “${world}”  ·  run /reload in-game (or rejoin the world) to apply changes`;
+    $('#instDatapacksHint').textContent = world === GLOBAL_DP
+      ? `${n} global datapack${n === 1 ? '' : 's'}  ·  copied into every world when you press Play (worldgen packs still need the Create-World screen for a brand-new world — 📂 grabs the .zip)`
+      : `${n} datapack${n === 1 ? '' : 's'} in “${world}”  ·  run /reload in-game (or rejoin the world) to apply changes`;
     renderInstanceDatapacksList(inst, world, data.entries);
   } catch (err) {
     list.innerHTML = ''; list.appendChild(emptyList('⚠', err.message));
@@ -3898,7 +3900,7 @@ function renderInstanceDatapacksList(inst, world, entries) {
   const list = $('#instDatapacksList');
   list.innerHTML = '';
   if (!entries.length) {
-    list.appendChild(emptyList('📦', 'No datapacks in this world yet. Click “Browse” to find datapacks on Modrinth, or “Add from disk”.'));
+    list.appendChild(emptyList('📦', 'No datapacks here yet. Click “Browse” to find datapacks on Modrinth, or “Add from disk”.'));
     return;
   }
   for (const item of entries) {
@@ -3932,19 +3934,24 @@ function openInstanceDatapacksBrowser() {
   const inst = currentInstance();
   const world = currentWorld();
   if (!inst || !world) return;
+  const isGlobal = world === GLOBAL_DP;
+  const targetLabel = isGlobal ? 'Global (all worlds)' : `“${world}”`;
   const input = el('input', { type: 'text', placeholder: 'Search… (e.g. Terralith, Incendium, Tectonic)' });
   const matchCb = el('input', { type: 'checkbox', checked: true });
   const matchLabel = el('span', {}, `Only show datapacks for Minecraft ${inst.mcVersion}`);
   const matchWrap = el('label', { class: 'mr-vfilter' }, matchCb, matchLabel);
   const results = el('div', { class: 'mr-results' }, el('div', { class: 'muted', style: 'padding:16px' }, 'Loading…'));
+  const hint = isGlobal
+    ? el('div', { class: 'hint', style: 'margin-top:10px' }, 'Datapacks from ', link('Modrinth', 'https://modrinth.com'),
+        ' — added to this instance’s ', el('b', {}, 'Global'), ' set, copied into every world when you press Play. For a worldgen pack on a brand-new world, use ', el('b', {}, '📂 Open folder'), ' and drag the .zip onto Minecraft’s Create-World → Data Packs screen.')
+    : el('div', { class: 'hint', style: 'margin-top:10px' }, 'Datapacks from ', link('Modrinth', 'https://modrinth.com'),
+        ' — installed into the world ', el('b', {}, `“${world}”`), '. Run ', el('b', {}, '/reload'),
+        ' in-game (or rejoin the world) to apply them. Note: worldgen datapacks only affect newly-generated chunks.');
   const body = el('div', {},
     el('div', { class: 'mr-search' }, input),
     el('div', { class: 'cm-filters' }, matchWrap),
-    results,
-    el('div', { class: 'hint', style: 'margin-top:10px' }, 'Datapacks from ',
-      link('Modrinth', 'https://modrinth.com'), ` — installed into the world “`, el('b', {}, world),
-      '”. Run ', el('b', {}, '/reload'), ' in-game (or rejoin the world) to apply them. Note: worldgen datapacks only affect newly-generated chunks.'));
-  modal({ title: `Add datapacks to “${world}”`, body, wide: true, actions: [{ label: 'Done', class: 'ghost-btn' }] });
+    results, hint);
+  modal({ title: `Add datapacks — ${targetLabel}`, body, wide: true, actions: [{ label: 'Done', class: 'ghost-btn' }] });
 
   let seq = 0;
   async function doSearch() {
